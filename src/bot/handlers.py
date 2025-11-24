@@ -22,6 +22,8 @@ from src.bot.keyboards import (
     get_result_summary_text,
     get_task_status_keyboard,
 )
+from src.utils.rate_limiter import RateLimiter, RateLimitConfig
+from src.utils.validation import FileValidator
 from src.worker import (
     ProcessingTask,
     TaskProgress,
@@ -46,6 +48,7 @@ class BotState:
         self.queue: Optional[TaskQueue] = None
         self.bot: Optional[Bot] = None
         self.settings: Optional[Settings] = None
+        self.rate_limiter: Optional[RateLimiter] = None
         self.admin_ids: Set[int] = set()
         self._progress_messages: Dict[str, int] = {}  # task_id -> message_id
         self._user_progress_chats: Dict[str, int] = {}  # task_id -> chat_id
@@ -60,8 +63,15 @@ class BotState:
         self.bot = bot
 
     def set_settings(self, settings: Settings) -> None:
-        """Set settings."""
+        """Set settings and initialize rate limiter."""
         self.settings = settings
+        if settings:
+            config = RateLimitConfig(
+                max_concurrent=settings.limits.rate_limits.per_user.max_concurrent,
+                max_per_hour=settings.limits.rate_limits.per_user.max_per_hour,
+                cooldown_seconds=settings.limits.rate_limits.per_user.cooldown_seconds,
+            )
+            self.rate_limiter = RateLimiter(config)
 
     def add_admin(self, user_id: int) -> None:
         """Add an admin user."""
@@ -331,10 +341,17 @@ async def handle_audio(message: Message) -> None:
         await message.answer(get_queue_full_text(), parse_mode="Markdown")
         return
 
-    # Check user limits
+    # Check concurrent limits
     if not state.queue.can_user_submit(user_id):
         await message.answer(get_rate_limit_text(300), parse_mode="Markdown")
         return
+
+    # Check rate limits (hourly/cooldown)
+    if state.rate_limiter:
+        is_allowed, info = state.rate_limiter.check_user(user_id)
+        if not is_allowed:
+            await message.answer(f"⚠️ {info.get('message', 'Rate limit exceeded.')}")
+            return
 
     # Validate file size
     max_size = state.settings.processing.max_file_size_mb * 1024 * 1024 if state.settings else 500 * 1024 * 1024
@@ -369,6 +386,25 @@ async def handle_audio(message: Message) -> None:
             file_name=file_info["file_name"],
             file_size=file_info["file_size"],
         )
+
+        # Validate file (magic bytes)
+        is_valid, error_msg = FileValidator.validate_file(local_path)
+        if not is_valid:
+            # Delete invalid file
+            try:
+                local_path.unlink()
+            except Exception:
+                pass
+            
+            await status_msg.edit_text(
+                f"⚠️ Invalid file format: {error_msg}\n"
+                "Please ensure you are sending a valid audio/video file."
+            )
+            return
+
+        # Record request for rate limiting
+        if state.rate_limiter:
+            state.rate_limiter.record_request(user_id)
 
         # Create task
         task = create_task(

@@ -226,7 +226,6 @@ class GigaAMTranscriber:
 
         return waveform[start_sample:end_sample]
 
-    @torch.inference_mode()
     def _transcribe_batch(
         self,
         segments: List["torch.Tensor"],
@@ -240,64 +239,69 @@ class GigaAMTranscriber:
         if not segments:
             return []
 
-        # Pad segments to same length
-        max_length = max(len(s) for s in segments)
-        padded = []
-        attention_masks = []
+        # Ensure dependencies are loaded
+        if torch is None:
+            _import_dependencies()
 
-        for seg in segments:
-            padding = max_length - len(seg)
-            if padding > 0:
-                padded_seg = torch.nn.functional.pad(seg, (0, padding))
+        with torch.inference_mode():
+            # Pad segments to same length
+            max_length = max(len(s) for s in segments)
+            padded = []
+            attention_masks = []
+
+            for seg in segments:
+                padding = max_length - len(seg)
+                if padding > 0:
+                    padded_seg = torch.nn.functional.pad(seg, (0, padding))
+                else:
+                    padded_seg = seg
+                padded.append(padded_seg)
+
+                # Create attention mask
+                mask = torch.ones(max_length)
+                if padding > 0:
+                    mask[-padding:] = 0
+                attention_masks.append(mask)
+
+            # Stack into batch
+            batch_waveforms = torch.stack(padded)
+            batch_attention = torch.stack(attention_masks)
+
+            # Process through model
+            inputs = self._processor(
+                batch_waveforms.numpy(),
+                sampling_rate=self.sample_rate,
+                return_tensors="pt",
+                padding=True,
+            )
+
+            input_values = inputs.input_values.to(self.device)
+            if hasattr(inputs, "attention_mask") and inputs.attention_mask is not None:
+                attention_mask = inputs.attention_mask.to(self.device)
             else:
-                padded_seg = seg
-            padded.append(padded_seg)
+                attention_mask = batch_attention.to(self.device)
 
-            # Create attention mask
-            mask = torch.ones(max_length)
-            if padding > 0:
-                mask[-padding:] = 0
-            attention_masks.append(mask)
+            # Get logits
+            outputs = self._model(input_values, attention_mask=attention_mask)
+            logits = outputs.logits
 
-        # Stack into batch
-        batch_waveforms = torch.stack(padded)
-        batch_attention = torch.stack(attention_masks)
+            # Decode predictions
+            predicted_ids = torch.argmax(logits, dim=-1)
+            transcriptions = self._processor.batch_decode(predicted_ids)
 
-        # Process through model
-        inputs = self._processor(
-            batch_waveforms.numpy(),
-            sampling_rate=self.sample_rate,
-            return_tensors="pt",
-            padding=True,
-        )
+            # Calculate confidence scores (optional)
+            confidences = []
+            probs = torch.nn.functional.softmax(logits, dim=-1)
+            for i in range(len(segments)):
+                # Average of max probabilities for each timestep
+                max_probs = probs[i].max(dim=-1).values
+                # Exclude padding
+                valid_length = int(len(segments[i]) / self.sample_rate * 50)  # ~50 frames per second
+                valid_probs = max_probs[:valid_length] if valid_length > 0 else max_probs
+                confidence = valid_probs.mean().item()
+                confidences.append(confidence)
 
-        input_values = inputs.input_values.to(self.device)
-        if hasattr(inputs, "attention_mask") and inputs.attention_mask is not None:
-            attention_mask = inputs.attention_mask.to(self.device)
-        else:
-            attention_mask = batch_attention.to(self.device)
-
-        # Get logits
-        outputs = self._model(input_values, attention_mask=attention_mask)
-        logits = outputs.logits
-
-        # Decode predictions
-        predicted_ids = torch.argmax(logits, dim=-1)
-        transcriptions = self._processor.batch_decode(predicted_ids)
-
-        # Calculate confidence scores (optional)
-        confidences = []
-        probs = torch.nn.functional.softmax(logits, dim=-1)
-        for i in range(len(segments)):
-            # Average of max probabilities for each timestep
-            max_probs = probs[i].max(dim=-1).values
-            # Exclude padding
-            valid_length = int(len(segments[i]) / self.sample_rate * 50)  # ~50 frames per second
-            valid_probs = max_probs[:valid_length] if valid_length > 0 else max_probs
-            confidence = valid_probs.mean().item()
-            confidences.append(confidence)
-
-        return list(zip(transcriptions, confidences))
+            return list(zip(transcriptions, confidences))
 
     async def transcribe_segments(
         self,
