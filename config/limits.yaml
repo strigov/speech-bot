@@ -1,0 +1,47 @@
+# Rate limiting configuration
+rate_limits:
+  per_user:
+    max_concurrent: 1
+    max_per_hour: 10
+    cooldown_seconds: 60
+  global:
+    max_queue_size: 50
+    max_active_tasks: 3
+
+# File size and duration limits
+file_limits:
+  max_size_mb: 150
+  max_duration_minutes: 180
+  allowed_extensions:
+    - .mp3
+    - .wav
+    - .ogg
+    - .flac
+    - .m4a
+    - .aac
+    - .wma
+    - .opus
+  allowed_mime_types:
+    - audio/mpeg
+    - audio/wav
+    - audio/x-wav
+    - audio/ogg
+    - audio/flac
+    - audio/mp4
+    - audio/aac
+    - audio/x-ms-wma
+    - audio/opus
+    - video/mp4
+    - video/webm
+
+# Processing timeouts
+timeouts:
+  download_seconds: 300
+  processing_minutes: 30
+  queue_wait_minutes: 60
+
+# Disk management
+storage:
+  max_temp_per_user_gb: 0.5
+  cleanup_interval_minutes: 30
+  orphan_file_age_hours: 24

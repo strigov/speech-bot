@@ -1,0 +1,36 @@
+# Telegram Bot Framework
+aiogram>=3.10.0
+
+# ML Framework (install separately with CUDA support)
+# pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+torch>=2.0.0
+torchaudio>=2.0.0
+
+# Hugging Face Transformers
+transformers>=4.35.0
+accelerate>=0.24.0
+
+# Speaker Diarization
+pyannote.audio==3.3.1
+
+# Audio Processing
+ffmpeg-python>=0.2.0
+pydub>=0.25.1
+soundfile>=0.12.1
+librosa>=0.10.0
+
+# Configuration
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+python-dotenv>=1.0.0
+PyYAML>=6.0.1
+
+# Async utilities
+aiofiles>=23.2.1
+
+# Logging
+structlog>=23.2.0
+
+# Development
+pytest>=7.4.0
+pytest-asyncio>=0.21.0

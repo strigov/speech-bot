@@ -1,0 +1,15 @@
+gigaam:
+  model_id: "ai-sage/GigaAM-v3"
+  processor_id: "ai-sage/GigaAM-v3"
+  sample_rate: 16000
+  chunk_length_s: 30
+  stride_length_s: 5
+
+pyannote:
+  model_id: "pyannote/speaker-diarization-3.1"
+  min_speakers: 1
+  max_speakers: 20
+  embedding_batch_size: 32
+  segmentation:
+    min_duration: 0.5
+    threshold: 0.5
