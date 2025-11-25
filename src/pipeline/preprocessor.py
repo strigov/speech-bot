@@ -211,6 +211,12 @@ class AudioPreprocessor:
         """
         # Check file exists
         if not file_path.exists():
+            logger.error(
+                "file_not_found_during_validation",
+                requested_path=str(file_path),
+                path_is_absolute=file_path.is_absolute(),
+                path_exists=file_path.exists(),
+            )
             return False, None, "File not found"
 
         # Validate extension
@@ -268,6 +274,9 @@ class AudioPreprocessor:
             user_id=user_id,
             task_id=task_id,
             input_file=input_path.name,
+            input_path=str(input_path),
+            input_path_exists=input_path.exists(),
+            input_path_is_absolute=input_path.is_absolute(),
         )
 
         # Validate if requested

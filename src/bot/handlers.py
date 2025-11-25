@@ -377,7 +377,12 @@ async def handle_audio(message: Message) -> None:
         file_path = Path(state.settings.paths.temp_dir if state.settings else "./temp") / "downloads" / str(user_id)
         file_path.mkdir(parents=True, exist_ok=True)
 
-        local_path = file_path / file_info["file_name"]
+        raw_name = file_info["file_name"]
+        safe_name = "".join(c for c in Path(raw_name).name if c.isalnum() or c in "._-")
+        if not safe_name:
+            safe_name = "file"
+
+        local_path = file_path / safe_name
         await message.bot.download_file(file.file_path, local_path)
 
         logger.info(
@@ -385,6 +390,8 @@ async def handle_audio(message: Message) -> None:
             user_id=user_id,
             file_name=file_info["file_name"],
             file_size=file_info["file_size"],
+            downloaded_to=str(local_path),
+            file_exists_after_download=local_path.exists(),
         )
 
         # Validate file (magic bytes)
@@ -411,6 +418,13 @@ async def handle_audio(message: Message) -> None:
             user_id=user_id,
             input_path=local_path,
             original_filename=file_info["file_name"],
+        )
+
+        logger.info(
+            "task_created",
+            task_id=task.task_id,
+            input_path=str(task.input_path),
+            input_path_exists=task.input_path.exists(),
         )
 
         # Track progress message

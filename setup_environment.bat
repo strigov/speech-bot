@@ -65,9 +65,11 @@ python -m pip install --upgrade pip
 
 REM Install PyTorch with CUDA support
 echo.
-echo Installing PyTorch with CUDA 12.1 support...
+echo WARNING: Installing PyTorch NIGHTLY for RTX 5070 Ti (Blackwell sm_120) support
+echo This is a development build and may be unstable.
+echo Installing with CUDA 12.8 support...
 echo This may take a while...
-pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+pip install --pre torch torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
 
 REM Install other dependencies
 echo.

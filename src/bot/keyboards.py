@@ -4,6 +4,15 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeybo
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 
 
+def _escape_markdown(text: str) -> str:
+    """Escape special Markdown characters for Telegram."""
+    # Escape special characters for Markdown v1
+    chars_to_escape = ['_', '*', '`', '[']
+    for char in chars_to_escape:
+        text = text.replace(char, f'\\{char}')
+    return text
+
+
 def get_cancel_keyboard() -> InlineKeyboardMarkup:
     """Get keyboard with cancel button."""
     builder = InlineKeyboardBuilder()
@@ -152,11 +161,13 @@ def get_result_summary_text(
 
 
 def get_error_text(error_message: str) -> str:
-    """Generate error display text."""
+    """Generate error display text with properly escaped Markdown."""
+    # Escape special Markdown characters to prevent parsing errors
+    escaped_error = _escape_markdown(error_message)
     return (
         f"❌ **Processing Failed**\n"
         f"\n"
-        f"Error: {error_message}\n"
+        f"Error: {escaped_error}\n"
         f"\n"
         f"Please try again or contact support if the issue persists."
     )

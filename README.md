@@ -11,11 +11,42 @@ A Windows-native Telegram Bot for high-quality audio transcription using GigaAM 
 - **Queue System**: Manages concurrent requests with a priority queue and fair usage limits.
 - **Admin Tools**: Built-in commands for monitoring GPU usage and queue status.
 
+## GPU Support: RTX 5070 Ti (Blackwell Architecture)
+
+**IMPORTANT**: The RTX 5070 Ti uses Blackwell architecture (sm_120) which requires **PyTorch NIGHTLY** builds for GPU acceleration. Stable PyTorch releases do not support this GPU yet (as of January 2025).
+
+### What This Means
+
+- GPU acceleration is available via PyTorch nightly (development builds)
+- Nightly builds may be unstable and have occasional bugs
+- Stable PyTorch support expected Q2-Q3 2025
+- PyAnnote was upgraded from 3.3.1 to 4.0.2+ for compatibility
+
+### If You Experience Issues
+
+**Fallback to CPU mode** (slower but stable):
+
+```batch
+cd d:\Projects\speech-bot
+venv\Scripts\activate.bat
+pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+```
+
+Then set in `.env`:
+```ini
+MODEL_DEVICE=cpu
+DIARIZATION_DEVICE=cpu
+PROCESSING_TIMEOUT_MINUTES=120
+```
+
+CPU mode is 10-50x slower but guaranteed to work until stable PyTorch support arrives.
+
 ## System Requirements
 
 - **OS**: Windows 10 or 11 (x64)
 - **GPU**: NVIDIA GPU with 12GB+ VRAM (RTX 3080/4070/5070 or better recommended)
-- **Driver**: Latest NVIDIA Studio or Game Ready Driver
+- **Driver**: NVIDIA Driver 581.80+ (for RTX 5070 Ti Blackwell support)
+- **CUDA**: CUDA Toolkit 12.8 (bundled with PyTorch nightly, or install separately)
 - **Storage**: SSD with at least 50GB free space (for models and temp files)
 - **Software**:
   - Python 3.10.x (Strict requirement)
@@ -40,7 +71,7 @@ A Windows-native Telegram Bot for high-quality audio transcription using GigaAM 
    TELEGRAM_BOT_TOKEN=your_telegram_bot_token
    HF_TOKEN=your_hugging_face_token
    ```
-   *Note: You need to accept the user agreement for `pyannote/speaker-diarization-3.1` on Hugging Face to get a valid token.*
+   *Note: You need to accept the user agreement for `pyannote/speaker-diarization-3.1` on Hugging Face to get a valid token. (Required for diarization feature)*
 
 ## Usage
 
@@ -67,6 +98,13 @@ You can tweak settings in `config/models.yaml` and `config/limits.yaml` (if avai
 - **MAX_USER_CONCURRENT**: Max files per user in queue (default: 3).
 
 ## Troubleshooting
+
+**"sm_120 is not compatible" or "CUDA capability sm_120 not supported"**
+- Your RTX 5070 Ti requires PyTorch nightly with CUDA 12.8
+- Verify installation: `python -c "import torch; print(torch.__version__, torch.version.cuda)"`
+- Should show: `2.10.0.dev20251124+cu128 12.8`
+- Reinstall if needed: `pip install --pre torch torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128`
+- Run `python check_cuda.py` for detailed diagnostics
 
 **"CUDA not available"**
 - Run `setup_cuda.bat` to verify your driver and CUDA installation.

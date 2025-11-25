@@ -20,6 +20,13 @@ def _import_dependencies():
 
     if torch is None:
         import torch as _torch
+        # NOTE: torchaudio_patch disabled - conflicts with PyTorch 2.x + pyannote.audio 3.2+
+        # Modern versions handle soundfile backend correctly without patching
+        # try:
+        #     from src.utils import torchaudio_patch
+        # except ImportError:
+        #     pass
+
         from pyannote.audio import Pipeline as _Pipeline
         from pyannote.audio import Audio as _Audio
 
@@ -163,7 +170,7 @@ class PyAnnoteDiarizer:
                 def _load():
                     pipeline = Pipeline.from_pretrained(
                         self.model_id,
-                        use_auth_token=self.hf_token,
+                        token=self.hf_token,
                     )
                     pipeline = pipeline.to(torch.device(self.device))
                     return pipeline
@@ -213,6 +220,8 @@ class PyAnnoteDiarizer:
         """
         Run diarization on a chunk of audio.
 
+        Compatible with pyannote.audio 3.x and 4.x versions.
+
         Args:
             audio_path: Path to audio file
             start_seconds: Start time in seconds
@@ -221,24 +230,56 @@ class PyAnnoteDiarizer:
         Returns:
             List of speaker segments
         """
-        # Prepare audio input
-        if end_seconds is not None:
-            # Process specific chunk
-            from pyannote.core import Segment
-            audio_input = {
-                "audio": str(audio_path),
-                "onset": start_seconds,
-                "offset": end_seconds,
-            }
-        else:
-            audio_input = str(audio_path)
+        # Load audio using torchaudio (with our soundfile fallback patch)
+        # This avoids PyAnnote's internal AudioDecoder that requires FFmpeg DLL
+        import torchaudio
 
-        # Run diarization
-        diarization = self._pipeline(
+        # Load the audio file
+        waveform, sample_rate = torchaudio.load(str(audio_path))
+
+        # Extract chunk if needed
+        if end_seconds is not None:
+            start_frame = int(start_seconds * sample_rate)
+            end_frame = int(end_seconds * sample_rate)
+            waveform = waveform[:, start_frame:end_frame]
+
+        # Prepare audio input as pre-loaded dict (PyAnnote supports this)
+        audio_input = {
+            "waveform": waveform,
+            "sample_rate": sample_rate,
+        }
+
+        # Run diarization with pre-loaded audio
+        output = self._pipeline(
             audio_input,
             min_speakers=self.min_speakers,
             max_speakers=self.max_speakers,
         )
+
+        # Handle both old and new pyannote.audio versions
+        # Version 4.0+: returns DiarizeOutput with .speaker_diarization attribute
+        # Version 3.2+: returns DiarizeOutput with .annotation attribute
+        # Old versions: return Annotation directly
+        logger.debug(
+            "diarization_output_type",
+            output_type=type(output).__name__,
+            has_speaker_diarization=hasattr(output, "speaker_diarization"),
+            has_annotation=hasattr(output, "annotation"),
+            has_itertracks=hasattr(output, "itertracks"),
+        )
+
+        if hasattr(output, "speaker_diarization"):
+            # pyannote.audio 4.0+
+            diarization = output.speaker_diarization
+            logger.debug("using_speaker_diarization_attribute")
+        elif hasattr(output, "annotation"):
+            # pyannote.audio 3.2+
+            diarization = output.annotation
+            logger.debug("using_annotation_attribute")
+        else:
+            # Old versions
+            diarization = output
+            logger.debug("using_output_directly")
 
         # Convert to segments
         segments = []

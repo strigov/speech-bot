@@ -11,24 +11,27 @@ logger = structlog.get_logger(__name__)
 # Lazy imports for heavy dependencies
 torch = None
 torchaudio = None
-Wav2Vec2ForCTC = None
-Wav2Vec2Processor = None
+AutoModel = None
 
 
 def _import_dependencies():
     """Lazy import heavy dependencies."""
-    global torch, torchaudio, Wav2Vec2ForCTC, Wav2Vec2Processor
+    global torch, torchaudio, AutoModel
 
     if torch is None:
         import torch as _torch
+        # Patch torchaudio for compatibility with nightly builds
+        try:
+            from src.utils import torchaudio_patch
+        except ImportError:
+            pass
+
         import torchaudio as _torchaudio
-        from transformers import Wav2Vec2ForCTC as _Wav2Vec2ForCTC
-        from transformers import Wav2Vec2Processor as _Wav2Vec2Processor
+        from transformers import AutoModel as _AutoModel
 
         torch = _torch
         torchaudio = _torchaudio
-        Wav2Vec2ForCTC = _Wav2Vec2ForCTC
-        Wav2Vec2Processor = _Wav2Vec2Processor
+        AutoModel = _AutoModel
 
 
 @dataclass
@@ -97,7 +100,6 @@ class GigaAMTranscriber:
         self.sample_rate = 16000
 
         self._model = None
-        self._processor = None
         self._is_loaded = False
         self._current_batch_size = batch_size
         self._initialized = True
@@ -133,17 +135,22 @@ class GigaAMTranscriber:
                     logger.warning("cuda_not_available_falling_back_to_cpu")
                     self.device = "cpu"
 
-                # Load processor and model in thread pool
+                # Load model in thread pool
                 loop = asyncio.get_event_loop()
 
                 def _load():
-                    processor = Wav2Vec2Processor.from_pretrained(self.model_id)
-                    model = Wav2Vec2ForCTC.from_pretrained(self.model_id)
-                    model = model.to(self.device)
+                    # GigaAM-v3 requires AutoModel with trust_remote_code
+                    model = AutoModel.from_pretrained(
+                        self.model_id,
+                        trust_remote_code=True,
+                        device_map=self.device if self.device == "cuda" else None,
+                    )
+                    if self.device != "cuda":
+                        model = model.to(self.device)
                     model.eval()
-                    return processor, model
+                    return model
 
-                self._processor, self._model = await loop.run_in_executor(None, _load)
+                self._model = await loop.run_in_executor(None, _load)
                 self._is_loaded = True
 
                 # Log GPU memory after loading
@@ -170,10 +177,6 @@ class GigaAMTranscriber:
             if self._model is not None:
                 del self._model
                 self._model = None
-
-            if self._processor is not None:
-                del self._processor
-                self._processor = None
 
             self._is_loaded = False
 
@@ -229,9 +232,10 @@ class GigaAMTranscriber:
     def _transcribe_batch(
         self,
         segments: List["torch.Tensor"],
+        temp_dir: Path,
     ) -> List[Tuple[str, Optional[float]]]:
         """
-        Transcribe a batch of audio segments.
+        Transcribe a batch of audio segments using GigaAM's .transcribe() method.
 
         Returns:
             List of (text, confidence) tuples
@@ -243,65 +247,38 @@ class GigaAMTranscriber:
         if torch is None:
             _import_dependencies()
 
+        results = []
+
         with torch.inference_mode():
-            # Pad segments to same length
-            max_length = max(len(s) for s in segments)
-            padded = []
-            attention_masks = []
+            for i, segment_audio in enumerate(segments):
+                # Save segment to temporary file for GigaAM's transcribe method
+                segment_path = temp_dir / f"segment_{i}.wav"
+                torchaudio.save(
+                    str(segment_path),
+                    segment_audio.unsqueeze(0),
+                    self.sample_rate,
+                )
 
-            for seg in segments:
-                padding = max_length - len(seg)
-                if padding > 0:
-                    padded_seg = torch.nn.functional.pad(seg, (0, padding))
-                else:
-                    padded_seg = seg
-                padded.append(padded_seg)
+                try:
+                    # Use GigaAM's built-in transcribe method
+                    transcription = self._model.transcribe(str(segment_path))
 
-                # Create attention mask
-                mask = torch.ones(max_length)
-                if padding > 0:
-                    mask[-padding:] = 0
-                attention_masks.append(mask)
+                    # GigaAM returns string directly
+                    if isinstance(transcription, str):
+                        text = transcription
+                    else:
+                        # In case it returns a dict or other structure
+                        text = str(transcription)
 
-            # Stack into batch
-            batch_waveforms = torch.stack(padded)
-            batch_attention = torch.stack(attention_masks)
+                    # No confidence scores available from GigaAM
+                    results.append((text, None))
 
-            # Process through model
-            inputs = self._processor(
-                batch_waveforms.numpy(),
-                sampling_rate=self.sample_rate,
-                return_tensors="pt",
-                padding=True,
-            )
+                finally:
+                    # Clean up temp file
+                    if segment_path.exists():
+                        segment_path.unlink()
 
-            input_values = inputs.input_values.to(self.device)
-            if hasattr(inputs, "attention_mask") and inputs.attention_mask is not None:
-                attention_mask = inputs.attention_mask.to(self.device)
-            else:
-                attention_mask = batch_attention.to(self.device)
-
-            # Get logits
-            outputs = self._model(input_values, attention_mask=attention_mask)
-            logits = outputs.logits
-
-            # Decode predictions
-            predicted_ids = torch.argmax(logits, dim=-1)
-            transcriptions = self._processor.batch_decode(predicted_ids)
-
-            # Calculate confidence scores (optional)
-            confidences = []
-            probs = torch.nn.functional.softmax(logits, dim=-1)
-            for i in range(len(segments)):
-                # Average of max probabilities for each timestep
-                max_probs = probs[i].max(dim=-1).values
-                # Exclude padding
-                valid_length = int(len(segments[i]) / self.sample_rate * 50)  # ~50 frames per second
-                valid_probs = max_probs[:valid_length] if valid_length > 0 else max_probs
-                confidence = valid_probs.mean().item()
-                confidences.append(confidence)
-
-            return list(zip(transcriptions, confidences))
+        return results
 
     async def transcribe_segments(
         self,
@@ -321,6 +298,7 @@ class GigaAMTranscriber:
             TranscriptionResult with all transcribed segments
         """
         import time
+        import tempfile
         start_time = time.time()
 
         # Ensure model is loaded
@@ -340,83 +318,94 @@ class GigaAMTranscriber:
         results: List[TranscriptionSegment] = []
         current_batch_size = self._current_batch_size
 
-        # Process in batches
-        total_segments = len(segments)
-        processed = 0
+        # Create temporary directory for segment files
+        temp_dir = Path(tempfile.mkdtemp(prefix="gigaam_"))
 
-        for batch_start in range(0, total_segments, current_batch_size):
-            batch_end = min(batch_start + current_batch_size, total_segments)
-            batch_segments = segments[batch_start:batch_end]
+        try:
+            # Process in batches
+            total_segments = len(segments)
+            processed = 0
 
-            # Extract audio for each segment
-            audio_segments = []
-            segment_info = []
+            for batch_start in range(0, total_segments, current_batch_size):
+                batch_end = min(batch_start + current_batch_size, total_segments)
+                batch_segments = segments[batch_start:batch_end]
 
-            for start, end, speaker_id in batch_segments:
-                seg_audio = self._extract_segment(waveform, start, end)
-                if len(seg_audio) > 0:
-                    audio_segments.append(seg_audio)
-                    segment_info.append((start, end, speaker_id))
+                # Extract audio for each segment
+                audio_segments = []
+                segment_info = []
 
-            if not audio_segments:
-                continue
+                for start, end, speaker_id in batch_segments:
+                    seg_audio = self._extract_segment(waveform, start, end)
+                    if len(seg_audio) > 0:
+                        audio_segments.append(seg_audio)
+                        segment_info.append((start, end, speaker_id))
 
-            # Try transcription with retry logic
-            retry_count = 0
-            max_retries = 3
+                if not audio_segments:
+                    continue
 
-            while retry_count < max_retries:
-                try:
-                    transcriptions = await loop.run_in_executor(
-                        None,
-                        self._transcribe_batch,
-                        audio_segments,
-                    )
+                # Try transcription with retry logic
+                retry_count = 0
+                max_retries = 3
 
-                    # Create result segments
-                    for (text, confidence), (start, end, speaker_id) in zip(
-                        transcriptions, segment_info
-                    ):
-                        results.append(TranscriptionSegment(
-                            text=text.strip(),
-                            start_seconds=start,
-                            end_seconds=end,
-                            confidence=confidence,
-                            speaker_id=speaker_id,
-                        ))
-
-                    break  # Success, exit retry loop
-
-                except RuntimeError as e:
-                    if "out of memory" in str(e).lower():
-                        # OOM error - reduce batch size and retry
-                        if torch.cuda.is_available():
-                            torch.cuda.empty_cache()
-
-                        current_batch_size = max(1, current_batch_size // 2)
-                        self._current_batch_size = current_batch_size
-
-                        logger.warning(
-                            "oom_reducing_batch_size",
-                            new_batch_size=current_batch_size,
-                            retry=retry_count + 1,
+                while retry_count < max_retries:
+                    try:
+                        transcriptions = await loop.run_in_executor(
+                            None,
+                            self._transcribe_batch,
+                            audio_segments,
+                            temp_dir,
                         )
-                        retry_count += 1
 
-                        if retry_count >= max_retries:
-                            return TranscriptionResult(
-                                error=f"OOM error after {max_retries} retries",
-                                is_successful=False,
+                        # Create result segments
+                        for (text, confidence), (start, end, speaker_id) in zip(
+                            transcriptions, segment_info
+                        ):
+                            results.append(TranscriptionSegment(
+                                text=text.strip(),
+                                start_seconds=start,
+                                end_seconds=end,
+                                confidence=confidence,
+                                speaker_id=speaker_id,
+                            ))
+
+                        break  # Success, exit retry loop
+
+                    except RuntimeError as e:
+                        if "out of memory" in str(e).lower():
+                            # OOM error - reduce batch size and retry
+                            if torch.cuda.is_available():
+                                torch.cuda.empty_cache()
+
+                            current_batch_size = max(1, current_batch_size // 2)
+                            self._current_batch_size = current_batch_size
+
+                            logger.warning(
+                                "oom_reducing_batch_size",
+                                new_batch_size=current_batch_size,
+                                retry=retry_count + 1,
                             )
-                    else:
-                        raise
+                            retry_count += 1
 
-            processed = batch_end
-            if progress_callback:
-                progress_callback(processed, total_segments)
+                            if retry_count >= max_retries:
+                                return TranscriptionResult(
+                                    error=f"OOM error after {max_retries} retries",
+                                    is_successful=False,
+                                )
+                        else:
+                            raise
 
-            # Yield control to event loop
-            await asyncio.sleep(0)
+                processed = batch_end
+                if progress_callback:
+                    progress_callback(processed, total_segments)
+
+                # Yield control to event loop
+                await asyncio.sleep(0)
+
+        finally:
+            # Clean up temp directory
+            import shutil
+            if temp_dir.exists():
+                shutil.rmtree(temp_dir, ignore_errors=True)
 
         # Build full text
         full_text = " ".join(seg.text for seg in results if seg.text)

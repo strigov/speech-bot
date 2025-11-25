@@ -142,16 +142,23 @@ ProgressCallback = Callable[[str, TaskProgress], None]
 class TaskQueue:
     """Async task queue with size limits and user tracking."""
 
-    def __init__(self, max_size: int = 50, max_per_user: int = 3):
+    def __init__(
+        self,
+        max_size: int = 50,
+        max_per_user: int = 3,
+        history_limit: int = 200,
+    ):
         """
         Initialize task queue.
 
         Args:
             max_size: Maximum queue size
             max_per_user: Maximum concurrent tasks per user
+            history_limit: Maximum number of completed tasks to retain
         """
         self.max_size = max_size
         self.max_per_user = max_per_user
+        self.history_limit = history_limit
         self._queue: asyncio.Queue[ProcessingTask] = asyncio.Queue(maxsize=max_size)
         self._tasks: Dict[str, ProcessingTask] = {}
         self._user_tasks: Dict[int, List[str]] = {}
@@ -240,6 +247,23 @@ class TaskQueue:
                         self._user_tasks[task.user_id].remove(task_id)
 
             self._queue.task_done()
+
+            # Trim completed task history to avoid unbounded growth
+            if len(self._tasks) > self.history_limit:
+                completed_ids = sorted(
+                    (
+                        tid for tid, t in self._tasks.items()
+                        if t.is_complete
+                    ),
+                    key=lambda tid: (
+                        self._tasks[tid].completed_at
+                        or self._tasks[tid].created_at
+                    ),
+                )
+                for tid in completed_ids:
+                    if len(self._tasks) <= self.history_limit:
+                        break
+                    self._tasks.pop(tid, None)
 
     async def cancel_task(self, task_id: str) -> bool:
         """Cancel a pending task."""

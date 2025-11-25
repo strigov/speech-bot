@@ -3,14 +3,15 @@
 from pathlib import Path
 from typing import Optional
 
-from pydantic import Field
+import yaml
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class TelegramSettings(BaseSettings):
     """Telegram bot configuration."""
 
-    model_config = SettingsConfigDict(env_prefix="TELEGRAM_")
+    model_config = SettingsConfigDict(env_prefix="TELEGRAM_", extra="ignore")
 
     bot_token: str = Field(..., description="Telegram bot token")
     api_url: str = Field(
@@ -26,11 +27,29 @@ class TelegramSettings(BaseSettings):
         description="Local bot API URL"
     )
 
+    # Telegram Client API (MTProto) for downloading large files
+    api_id: Optional[int] = Field(
+        default=None,
+        description="Telegram API ID from my.telegram.org"
+    )
+    api_hash: Optional[str] = Field(
+        default=None,
+        description="Telegram API Hash from my.telegram.org"
+    )
+    use_client_api: bool = Field(
+        default=False,
+        description="Use Telegram Client API for downloading files > 20MB"
+    )
+    session_name: str = Field(
+        default="bot_session",
+        description="Session name for Telegram Client"
+    )
+
 
 class ModelSettings(BaseSettings):
     """ML model configuration."""
 
-    model_config = SettingsConfigDict(env_prefix="MODEL_")
+    model_config = SettingsConfigDict(env_prefix="MODEL_", extra="ignore")
 
     hf_token: str = Field(default="", alias="HF_TOKEN", description="Hugging Face token")
     device: str = Field(default="cuda", description="Device for ASR model")
@@ -54,7 +73,7 @@ class ModelSettings(BaseSettings):
 class ProcessingSettings(BaseSettings):
     """Audio processing limits and parameters."""
 
-    model_config = SettingsConfigDict(env_prefix="")
+    model_config = SettingsConfigDict(env_prefix="", extra="ignore")
 
     max_audio_duration_minutes: int = Field(
         default=180,
@@ -91,7 +110,7 @@ class ProcessingSettings(BaseSettings):
 class MemorySettings(BaseSettings):
     """Memory management configuration."""
 
-    model_config = SettingsConfigDict(env_prefix="")
+    model_config = SettingsConfigDict(env_prefix="", extra="ignore")
 
     max_vram_gb: float = Field(
         default=14.0,
@@ -128,7 +147,7 @@ class MemorySettings(BaseSettings):
 class PathSettings(BaseSettings):
     """File path configuration."""
 
-    model_config = SettingsConfigDict(env_prefix="")
+    model_config = SettingsConfigDict(env_prefix="", extra="ignore")
 
     temp_dir: Path = Field(
         default=Path("./temp"),
@@ -151,15 +170,97 @@ class PathSettings(BaseSettings):
         description="Maximum temp storage per user in GB"
     )
 
+    def model_post_init(self, __context) -> None:
+        """Convert relative paths to absolute paths."""
+        # Convert to absolute paths relative to project root
+        self.temp_dir = self.temp_dir.resolve()
+        self.log_dir = self.log_dir.resolve()
+        self.checkpoint_dir = self.checkpoint_dir.resolve()
+
 
 class DevelopmentSettings(BaseSettings):
     """Development configuration."""
 
-    model_config = SettingsConfigDict(env_prefix="")
+    model_config = SettingsConfigDict(env_prefix="", extra="ignore")
 
     debug: bool = Field(default=False, alias="DEBUG")
     hot_reload: bool = Field(default=False, alias="HOT_RELOAD")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+
+
+class PerUserLimits(BaseModel):
+    """Per-user rate limits."""
+
+    max_concurrent: int = 1
+    max_per_hour: int = 10
+    cooldown_seconds: int = 60
+
+
+class GlobalLimits(BaseModel):
+    """Global queue limits."""
+
+    max_queue_size: int = 50
+    max_active_tasks: int = 3
+
+
+class RateLimits(BaseModel):
+    """Rate limiting configuration."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    per_user: PerUserLimits = Field(default_factory=PerUserLimits)
+    global_: GlobalLimits = Field(default_factory=GlobalLimits, alias="global")
+
+
+class FileLimits(BaseModel):
+    """File size and format limits."""
+
+    max_size_mb: int = 150
+    max_duration_minutes: int = 180
+    allowed_extensions: list[str] = Field(default_factory=lambda: [
+        ".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac", ".wma", ".opus", ".mp4", ".webm",
+    ])
+    allowed_mime_types: list[str] = Field(default_factory=lambda: [
+        "audio/mpeg", "audio/wav", "audio/x-wav", "audio/ogg", "audio/flac",
+        "audio/mp4", "audio/aac", "audio/x-ms-wma", "audio/opus", "video/mp4", "video/webm",
+    ])
+
+
+class TimeoutLimits(BaseModel):
+    """Processing timeouts."""
+
+    download_seconds: int = 300
+    processing_minutes: int = 30
+    queue_wait_minutes: int = 60
+
+
+class StorageLimits(BaseModel):
+    """Temporary storage limits and cleanup."""
+
+    max_temp_per_user_gb: float = 0.5
+    cleanup_interval_minutes: int = 30
+    orphan_file_age_hours: int = 24
+
+
+class LimitsSettings(BaseModel):
+    """Wrapper for limits loaded from YAML."""
+
+    rate_limits: RateLimits = Field(default_factory=RateLimits)
+    file_limits: FileLimits = Field(default_factory=FileLimits)
+    timeouts: TimeoutLimits = Field(default_factory=TimeoutLimits)
+    storage: StorageLimits = Field(default_factory=StorageLimits)
+
+    @classmethod
+    def from_yaml(cls, path: Path | str | None = None) -> "LimitsSettings":
+        """Load limits from YAML file, falling back to defaults on error."""
+        config_path = Path(path) if path else Path(__file__).parent / "limits.yaml"
+        if config_path.exists():
+            try:
+                data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+                return cls.model_validate(data)
+            except Exception:
+                pass
+        return cls()
 
 
 class Settings(BaseSettings):
@@ -171,12 +272,13 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    telegram: TelegramSettings = Field(default_factory=TelegramSettings)
-    model: ModelSettings = Field(default_factory=ModelSettings)
-    processing: ProcessingSettings = Field(default_factory=ProcessingSettings)
-    memory: MemorySettings = Field(default_factory=MemorySettings)
-    paths: PathSettings = Field(default_factory=PathSettings)
-    dev: DevelopmentSettings = Field(default_factory=DevelopmentSettings)
+    telegram: TelegramSettings = Field(default_factory=lambda: TelegramSettings(_env_file=".env"))
+    model: ModelSettings = Field(default_factory=lambda: ModelSettings(_env_file=".env"))
+    processing: ProcessingSettings = Field(default_factory=lambda: ProcessingSettings(_env_file=".env"))
+    memory: MemorySettings = Field(default_factory=lambda: MemorySettings(_env_file=".env"))
+    paths: PathSettings = Field(default_factory=lambda: PathSettings(_env_file=".env"))
+    dev: DevelopmentSettings = Field(default_factory=lambda: DevelopmentSettings(_env_file=".env"))
+    limits: LimitsSettings = Field(default_factory=LimitsSettings.from_yaml)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -189,6 +291,7 @@ class Settings(BaseSettings):
         self.paths.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         (self.paths.temp_dir / "audio").mkdir(exist_ok=True)
         (self.paths.temp_dir / "results").mkdir(exist_ok=True)
+        (self.paths.temp_dir / "downloads").mkdir(exist_ok=True)
 
 
 def get_settings() -> Settings:

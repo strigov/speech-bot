@@ -40,6 +40,9 @@ REM Activate virtual environment
 echo Activating virtual environment...
 call venv\Scripts\activate.bat
 
+REM Add FFmpeg to PATH for this session
+set "PATH=%PATH%;C:\Program Files\DownloadHelper CoApp"
+
 REM Set development environment variables
 set DEBUG=true
 set HOT_RELOAD=true

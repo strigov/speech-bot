@@ -187,7 +187,7 @@ class UserRateLimitFilter(BaseFilter):
         if not self.rate_limiter:
             return True
 
-        is_allowed, info = await self.rate_limiter.check_user(user_id)
+        is_allowed, info = self.rate_limiter.check_user(user_id)
 
         if not is_allowed:
             return False
