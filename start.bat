@@ -46,7 +46,7 @@ REM Run the application
 echo.
 echo Starting bot...
 echo.
-python main.py
+venv\Scripts\python.exe main.py
 
 REM Deactivate on exit
 deactivate

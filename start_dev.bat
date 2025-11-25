@@ -56,12 +56,12 @@ echo Press Ctrl+C to stop
 echo.
 
 REM Try to use watchmedo for auto-reload, fall back to regular python
-where watchmedo >nul 2>&1
+where venv\Scripts\watchmedo.exe >nul 2>&1
 if %errorlevel% equ 0 (
-    watchmedo auto-restart --directory=. --pattern="*.py" --recursive -- python main.py
+    venv\Scripts\watchmedo.exe auto-restart --directory=. --pattern="*.py" --recursive -- venv\Scripts\python.exe main.py
 ) else (
     echo Note: Install watchdog for auto-reload: pip install watchdog
-    python main.py
+    venv\Scripts\python.exe main.py
 )
 
 deactivate

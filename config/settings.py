@@ -1,10 +1,10 @@
 """Configuration management using Pydantic settings."""
 
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -44,6 +44,31 @@ class TelegramSettings(BaseSettings):
         default="bot_session",
         description="Session name for Telegram Client"
     )
+
+    # Access control
+    admin_user_ids: list[int] = Field(
+        default_factory=list,
+        alias="ADMIN_USER_IDS",
+        description="List of admin user IDs who can use admin commands"
+    )
+    allowed_chat_ids: list[int] = Field(
+        default_factory=list,
+        alias="ALLOWED_CHAT_IDS",
+        description="List of allowed chat IDs (users and groups) for audio processing"
+    )
+
+    @field_validator("admin_user_ids", "allowed_chat_ids", mode="before")
+    @classmethod
+    def parse_int_list(cls, v: Any) -> list[int]:
+        """Parse comma-separated string or list of integers."""
+        if isinstance(v, str):
+            # Parse comma-separated string
+            if not v.strip():
+                return []
+            return [int(x.strip()) for x in v.split(",") if x.strip()]
+        elif isinstance(v, list):
+            return [int(x) for x in v]
+        return []
 
 
 class ModelSettings(BaseSettings):

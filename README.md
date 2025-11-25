@@ -97,6 +97,53 @@ You can tweak settings in `config/models.yaml` and `config/limits.yaml` (if avai
 - **MAX_AUDIO_DURATION_MINUTES**: Maximum allowed audio length (default: 180).
 - **MAX_USER_CONCURRENT**: Max files per user in queue (default: 3).
 
+### Access Control
+
+By default, the bot is open to everyone. You can restrict access to specific users and chats:
+
+1. **Admin Users** - Can use admin commands like `/admin`:
+   ```ini
+   TELEGRAM_ADMIN_USER_IDS=123456789,987654321
+   ```
+
+2. **Allowed Chats** - Can send audio files for transcription:
+   ```ini
+   TELEGRAM_ALLOWED_CHAT_IDS=123456789,-1001234567890,987654321
+   ```
+   - Use positive IDs for private chats (user IDs)
+   - Use negative IDs for group chats (start with `-100`)
+   - Leave empty to allow everyone
+
+**How to get Chat/User IDs:**
+- For private chats: User IDs can be obtained from bots like @userinfobot
+- For groups: Add @RawDataBot to your group - it will show the chat ID
+
+### Large Files Support (> 20 MB)
+
+Telegram Bot API has a 20 MB file size limit. To support larger files:
+
+1. **Get Telegram API credentials** from https://my.telegram.org/apps:
+   - Click "API development tools"
+   - Fill in the form (app title/short name can be anything)
+   - You'll get `api_id` (number) and `api_hash` (string)
+
+2. **Configure in `.env`**:
+   ```ini
+   TELEGRAM_API_ID=your_api_id_here
+   TELEGRAM_API_HASH=your_api_hash_here
+   TELEGRAM_USE_CLIENT_API=true
+   ```
+
+3. **Enable Privacy Mode OFF** for group chat support:
+   - Message @BotFather in Telegram
+   - Send `/setprivacy`
+   - Select your bot
+   - Choose **Disable** (turn privacy mode OFF)
+
+   This allows the bot to see all messages in groups, not just commands or replies.
+
+With Client API enabled, the bot can download files up to 2 GB.
+
 ## Troubleshooting
 
 **"sm_120 is not compatible" or "CUDA capability sm_120 not supported"**

@@ -10,7 +10,8 @@ from aiogram.types import CallbackQuery, FSInputFile, Message
 import structlog
 
 from config.settings import Settings
-from src.bot.filters import AudioFileFilter, AdminFilter, get_file_info_from_message
+from src.bot.filters import AudioFileFilter, AdminFilter, AllowedChatFilter, get_file_info_from_message
+from src.utils.telegram_client import get_telegram_client, init_telegram_client, should_use_client_api
 from src.bot.keyboards import (
     get_admin_keyboard,
     get_cancel_keyboard,
@@ -50,6 +51,7 @@ class BotState:
         self.settings: Optional[Settings] = None
         self.rate_limiter: Optional[RateLimiter] = None
         self.admin_ids: Set[int] = set()
+        self.allowed_chat_ids: Set[int] = set()
         self._progress_messages: Dict[str, int] = {}  # task_id -> message_id
         self._user_progress_chats: Dict[str, int] = {}  # task_id -> chat_id
 
@@ -72,6 +74,10 @@ class BotState:
                 cooldown_seconds=settings.limits.rate_limits.per_user.cooldown_seconds,
             )
             self.rate_limiter = RateLimiter(config)
+
+            # Load access control lists
+            self.admin_ids = set(settings.telegram.admin_user_ids)
+            self.allowed_chat_ids = set(settings.telegram.allowed_chat_ids)
 
     def add_admin(self, user_id: int) -> None:
         """Add an admin user."""
@@ -322,6 +328,20 @@ async def handle_audio(message: Message) -> None:
     """Handle incoming audio files."""
     user_id = message.from_user.id
 
+    # Check if chat is allowed
+    if state.allowed_chat_ids and message.chat.id not in state.allowed_chat_ids:
+        logger.warning(
+            "unauthorized_chat_access",
+            user_id=user_id,
+            chat_id=message.chat.id,
+            username=message.from_user.username if message.from_user else None,
+        )
+        await message.answer(
+            "⛔ This bot is restricted to authorized users only.\n"
+            "Please contact the bot administrator if you need access."
+        )
+        return
+
     # Extract file info
     file_info = get_file_info_from_message(message)
     if not file_info:
@@ -372,8 +392,7 @@ async def handle_audio(message: Message) -> None:
     )
 
     try:
-        # Download file
-        file = await message.bot.get_file(file_info["file_id"])
+        # Prepare download path
         file_path = Path(state.settings.paths.temp_dir if state.settings else "./temp") / "downloads" / str(user_id)
         file_path.mkdir(parents=True, exist_ok=True)
 
@@ -383,7 +402,43 @@ async def handle_audio(message: Message) -> None:
             safe_name = "file"
 
         local_path = file_path / safe_name
-        await message.bot.download_file(file.file_path, local_path)
+
+        # Check if we need to use Client API for large files
+        use_client_api = await should_use_client_api(file_info["file_size"])
+
+        if use_client_api:
+            # Use Telegram Client API for large files (> 20 MB)
+            client = get_telegram_client()
+            if client and client.is_started():
+                logger.info(
+                    "using_client_api_for_large_file",
+                    user_id=user_id,
+                    file_size=file_info["file_size"],
+                    file_name=file_info["file_name"],
+                )
+
+                success = await client.download_file(
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    destination=local_path,
+                )
+
+                if not success:
+                    await status_msg.edit_text(
+                        "⚠️ Failed to download file using Client API.\n"
+                        "Please ensure the bot has proper API credentials configured."
+                    )
+                    return
+            else:
+                await status_msg.edit_text(
+                    "⚠️ File is too large (> 20 MB) but Client API is not configured.\n"
+                    "Please contact the bot administrator to enable large file support."
+                )
+                return
+        else:
+            # Use standard Bot API for small files (<= 20 MB)
+            file = await message.bot.get_file(file_info["file_id"])
+            await message.bot.download_file(file.file_path, local_path)
 
         logger.info(
             "file_downloaded",
@@ -582,7 +637,13 @@ async def callback_download(callback: CallbackQuery) -> None:
 @admin_router.message(Command("admin"))
 async def cmd_admin(message: Message, command: CommandObject) -> None:
     """Handle /admin command."""
-    if message.from_user.id not in state.admin_ids:
+    # Check if user is admin
+    if not state.admin_ids or message.from_user.id not in state.admin_ids:
+        logger.warning(
+            "unauthorized_admin_access",
+            user_id=message.from_user.id,
+            username=message.from_user.username if message.from_user else None,
+        )
         await message.answer("⛔ Admin access required.")
         return
 
@@ -689,8 +750,9 @@ async def admin_stats(message: Message) -> None:
 @admin_router.callback_query(F.data.startswith("admin_"))
 async def callback_admin(callback: CallbackQuery) -> None:
     """Handle admin callback buttons."""
-    if callback.from_user.id not in state.admin_ids:
-        await callback.answer("Admin access required")
+    # Check if user is admin
+    if not state.admin_ids or callback.from_user.id not in state.admin_ids:
+        await callback.answer("⛔ Admin access required")
         return
 
     action = callback.data.replace("admin_", "")
@@ -746,6 +808,22 @@ def create_bot(settings: Settings) -> tuple[Bot, Dispatcher]:
     # Store references
     state.set_bot(bot)
     state.set_settings(settings)
+
+    # Initialize Telegram Client API for large files if configured
+    if settings.telegram.use_client_api and settings.telegram.api_id and settings.telegram.api_hash:
+        try:
+            init_telegram_client(
+                api_id=settings.telegram.api_id,
+                api_hash=settings.telegram.api_hash,
+                bot_token=settings.telegram.bot_token,
+                session_name=settings.telegram.session_name,
+                session_dir=settings.paths.temp_dir / "sessions",
+            )
+            logger.info("telegram_client_api_initialized", supports_large_files=True)
+        except Exception as e:
+            logger.warning("telegram_client_api_init_failed", error=str(e))
+    else:
+        logger.info("telegram_client_api_not_configured", supports_large_files=False)
 
     logger.info("bot_created")
     return bot, dp

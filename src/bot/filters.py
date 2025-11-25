@@ -209,6 +209,33 @@ class AdminFilter(BaseFilter):
         return message.from_user.id in self.admin_ids
 
 
+class AllowedChatFilter(BaseFilter):
+    """Filter for allowed chats/users."""
+
+    def __init__(self, allowed_chat_ids: Set[int]):
+        """
+        Initialize with allowed chat IDs.
+
+        Args:
+            allowed_chat_ids: Set of allowed chat IDs (users and groups)
+        """
+        self.allowed_chat_ids = allowed_chat_ids
+
+    async def __call__(self, message: Message) -> bool:
+        """
+        Check if message is from an allowed chat.
+
+        Returns:
+            True if chat is allowed or no restrictions configured, False otherwise
+        """
+        # If no restrictions configured, allow all
+        if not self.allowed_chat_ids:
+            return True
+
+        # Check if chat ID is in allowed list
+        return message.chat.id in self.allowed_chat_ids
+
+
 def get_file_info_from_message(message: Message) -> Optional[Dict[str, Any]]:
     """
     Extract file information from a message.
