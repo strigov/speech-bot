@@ -23,15 +23,14 @@ Develop a Windows-native Telegram Bot for audio transcription using GigaAM v3 AS
 - **Telegram Framework:** `aiogram>=3.10.0` (async)
 - **ASR Model:** GigaAM v3 via Hugging Face Transformers
   - Model: `ai-sage/GigaAM-v3`
-  - Components: `Wav2Vec2ForCTC`, `Wav2Vec2Processor`
-- **Diarization:** `pyannote.audio==3.3.1`
-  - Model: `pyannote/speaker-diarization-3.1`
+- **Diarization:** `pyannote.audio==4.0.0`
+  - Model: `pyannote/speaker-diarization-4`
   - Requires: Hugging Face access token
 - **Audio Processing:**
   - `ffmpeg-python` (wrapper)
   - `pydub` (segmentation)
   - `torchaudio` (tensor operations)
-- **ML Framework:** PyTorch 2.0+ with CUDA 12.1 support
+- **ML Framework:** PyTorch 2.8.0+cu128
 
 ### System Requirements
 - FFmpeg binary installed and in PATH

@@ -6,7 +6,7 @@ gigaam:
   stride_length_s: 5
 
 pyannote:
-  model_id: "pyannote/speaker-diarization-3.1"
+  model_id: "pyannote/speaker-diarization-community-1"
   min_speakers: 1
   max_speakers: 20
   embedding_batch_size: 32

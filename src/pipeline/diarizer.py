@@ -20,7 +20,7 @@ def _import_dependencies():
 
     if torch is None:
         import torch as _torch
-        # NOTE: torchaudio_patch disabled - conflicts with PyTorch 2.x + pyannote.audio 3.2+
+        # NOTE: torchaudio_patch disabled - conflicts with PyTorch 2.x + pyannote.audio 4
         # Modern versions handle soundfile backend correctly without patching
         # try:
         #     from src.utils import torchaudio_patch
@@ -90,7 +90,7 @@ class PyAnnoteDiarizer:
 
     def __init__(
         self,
-        model_id: str = "pyannote/speaker-diarization-3.1",
+        model_id: str = "pyannote/speaker-diarization-community-1",
         hf_token: str = "",
         device: str = "cuda",
         batch_size: int = 32,
@@ -175,7 +175,15 @@ class PyAnnoteDiarizer:
                     pipeline = pipeline.to(torch.device(self.device))
                     return pipeline
 
-                self._pipeline = await loop.run_in_executor(None, _load)
+                try:
+                    self._pipeline = await asyncio.wait_for(
+                        loop.run_in_executor(None, _load),
+                        timeout=300.0,  # 5 minutes timeout for model loading
+                    )
+                except asyncio.TimeoutError:
+                    error_msg = "Model loading timeout (exceeded 5 minutes)"
+                    logger.error("model_load_timeout", model_id=self.model_id)
+                    return False, error_msg
                 self._is_loaded = True
 
                 # Log GPU memory after loading
@@ -457,10 +465,26 @@ class PyAnnoteDiarizer:
 
         # Get audio duration
         try:
-            _import_dependencies()
-            audio = Audio(mono="downmix", sample_rate=16000)
-            waveform, sample_rate = audio(audio_path)
-            total_duration = waveform.shape[1] / sample_rate
+            import torchaudio
+
+            # Prefer lightweight metadata lookup to avoid AudioDecoder/torchcodec
+            try:
+                info = torchaudio.info(str(audio_path))
+                sample_rate = info.sample_rate
+                num_frames = info.num_frames
+            except Exception:
+                sample_rate = 0
+                num_frames = 0
+
+            # Fallback to full load if metadata is missing or invalid
+            if sample_rate <= 0 or num_frames <= 0:
+                waveform, sample_rate = torchaudio.load(str(audio_path))
+                num_frames = waveform.shape[1]
+
+            if sample_rate <= 0 or num_frames <= 0:
+                raise ValueError("Invalid audio metadata")
+
+            total_duration = num_frames / sample_rate
         except Exception as e:
             return DiarizationResult(
                 error=f"Failed to load audio: {str(e)}",
@@ -497,10 +521,21 @@ class PyAnnoteDiarizer:
             chunks = []
             current_start = 0.0
 
+            # Build chunk boundaries with overlap, ensuring forward progress
             while current_start < total_duration:
                 chunk_end = min(current_start + chunk_duration_seconds, total_duration)
                 chunks.append((current_start, chunk_end))
-                current_start = chunk_end - overlap_seconds
+
+                # Stop if we've reached the end
+                if chunk_end >= total_duration:
+                    break
+
+                next_start = chunk_end - overlap_seconds
+                # Guard against non-progress (overlap >= chunk size or rounding issues)
+                if next_start <= current_start:
+                    next_start = chunk_end
+
+                current_start = next_start
 
             logger.info(
                 "diarizing_in_chunks",
@@ -586,7 +621,7 @@ class PyAnnoteDiarizer:
 
 # Convenience function to get singleton instance
 def get_diarizer(
-    model_id: str = "pyannote/speaker-diarization-3.1",
+    model_id: str = "pyannote/speaker-diarization-community-1",
     hf_token: str = "",
     device: str = "cuda",
 ) -> PyAnnoteDiarizer:

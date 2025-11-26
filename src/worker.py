@@ -642,10 +642,29 @@ class Worker:
                         timeout=self.timeout_seconds,
                     )
                 except asyncio.TimeoutError:
+                    logger.error(
+                        "task_timeout",
+                        task_id=task.task_id,
+                        user_id=task.user_id,
+                        timeout_seconds=self.timeout_seconds,
+                    )
                     task.error = "Processing timeout"
                     task.progress = TaskProgress(
                         status=TaskStatus.TIMEOUT,
                         message=f"Task exceeded {self.timeout_seconds}s timeout",
+                    )
+                except Exception as e:
+                    logger.error(
+                        "task_processing_error",
+                        task_id=task.task_id,
+                        user_id=task.user_id,
+                        error=str(e),
+                        error_type=type(e).__name__,
+                    )
+                    task.error = str(e)
+                    task.progress = TaskProgress(
+                        status=TaskStatus.FAILED,
+                        message=f"Processing failed: {str(e)}",
                     )
 
                 await self.queue.complete_task(task.task_id)

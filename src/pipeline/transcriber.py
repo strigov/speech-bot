@@ -80,6 +80,7 @@ class GigaAMTranscriber:
         device: str = "cuda",
         batch_size: int = 32,
         max_vram_gb: float = 14.0,
+        longform_threshold_seconds: float = 25.0,
     ):
         """
         Initialize transcriber.
@@ -89,6 +90,7 @@ class GigaAMTranscriber:
             device: Device to run model on ('cuda' or 'cpu')
             batch_size: Default batch size for processing
             max_vram_gb: Maximum VRAM to use
+            longform_threshold_seconds: Duration above which to use transcribe_longform
         """
         if self._initialized:
             return
@@ -98,6 +100,8 @@ class GigaAMTranscriber:
         self.batch_size = batch_size
         self.max_vram_gb = max_vram_gb
         self.sample_rate = 16000
+        # GigaAM's .transcribe() rejects audio longer than ~25s
+        self.longform_threshold_seconds = longform_threshold_seconds
 
         self._model = None
         self._is_loaded = False
@@ -235,7 +239,8 @@ class GigaAMTranscriber:
         temp_dir: Path,
     ) -> List[Tuple[str, Optional[float]]]:
         """
-        Transcribe a batch of audio segments using GigaAM's .transcribe() method.
+        Transcribe a batch of audio segments using GigaAM's .transcribe()
+        or .transcribe_longform() when segments exceed the short-form limit.
 
         Returns:
             List of (text, confidence) tuples
@@ -260,15 +265,35 @@ class GigaAMTranscriber:
                 )
 
                 try:
-                    # Use GigaAM's built-in transcribe method
-                    transcription = self._model.transcribe(str(segment_path))
+                    # Calculate segment duration
+                    duration_seconds = len(segment_audio) / self.sample_rate
 
-                    # GigaAM returns string directly
-                    if isinstance(transcription, str):
-                        text = transcription
+                    # Use transcribe_longform for segments beyond the model limit (~25s)
+                    if (
+                        duration_seconds >= self.longform_threshold_seconds
+                        and hasattr(self._model, "transcribe_longform")
+                    ):
+                        longform_output = self._model.transcribe_longform(str(segment_path))
+
+                        if isinstance(longform_output, list):
+                            parts = []
+                            for item in longform_output:
+                                if isinstance(item, dict):
+                                    parts.append(str(item.get("transcription", "")).strip())
+                                else:
+                                    parts.append(str(item).strip())
+                            text = " ".join(p for p in parts if p)
+                        else:
+                            text = str(longform_output)
                     else:
-                        # In case it returns a dict or other structure
-                        text = str(transcription)
+                        transcription = self._model.transcribe(str(segment_path))
+
+                        # GigaAM returns string directly
+                        if isinstance(transcription, str):
+                            text = transcription
+                        else:
+                            # In case it returns a dict or other structure
+                            text = str(transcription)
 
                     # No confidence scores available from GigaAM
                     results.append((text, None))
@@ -430,7 +455,8 @@ class GigaAMTranscriber:
     async def transcribe_file(
         self,
         audio_path: Path,
-        max_segment_seconds: float = 30.0,
+        # Keep segments below GigaAM short-form threshold (~25s)
+        max_segment_seconds: float = 24.0,
         min_segment_seconds: float = 0.5,
         progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> TranscriptionResult:

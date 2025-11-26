@@ -226,7 +226,8 @@ class ResultAggregator:
         self,
         transcriber: GigaAMTranscriber,
         min_segment_seconds: float = 0.5,
-        max_segment_seconds: float = 30.0,
+        # GigaAM's native .transcribe() rejects >25s, keep below for margin
+        max_segment_seconds: float = 24.0,
         merge_adjacent: bool = True,
     ):
         """
