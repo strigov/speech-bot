@@ -68,16 +68,17 @@ class BotState:
         """Set settings and initialize rate limiter."""
         self.settings = settings
         if settings:
+            # Load access control lists
+            self.admin_ids = set(settings.telegram.admin_user_ids)
+            self.allowed_chat_ids = set(settings.telegram.allowed_chat_ids)
+
+            # Initialize rate limiter with admin bypass
             config = RateLimitConfig(
                 max_concurrent=settings.limits.rate_limits.per_user.max_concurrent,
                 max_per_hour=settings.limits.rate_limits.per_user.max_per_hour,
                 cooldown_seconds=settings.limits.rate_limits.per_user.cooldown_seconds,
             )
-            self.rate_limiter = RateLimiter(config)
-
-            # Load access control lists
-            self.admin_ids = set(settings.telegram.admin_user_ids)
-            self.allowed_chat_ids = set(settings.telegram.allowed_chat_ids)
+            self.rate_limiter = RateLimiter(config, admin_ids=self.admin_ids)
 
     def add_admin(self, user_id: int) -> None:
         """Add an admin user."""
@@ -361,12 +362,13 @@ async def handle_audio(message: Message) -> None:
         await message.answer(get_queue_full_text(), parse_mode="Markdown")
         return
 
-    # Check concurrent limits
-    if not state.queue.can_user_submit(user_id):
+    # Check concurrent limits (skip for admins)
+    is_admin = user_id in state.admin_ids
+    if not is_admin and not state.queue.can_user_submit(user_id):
         await message.answer(get_rate_limit_text(300), parse_mode="Markdown")
         return
 
-    # Check rate limits (hourly/cooldown)
+    # Check rate limits (hourly/cooldown) - admins bypass this in RateLimiter
     if state.rate_limiter:
         is_allowed, info = state.rate_limiter.check_user(user_id)
         if not is_allowed:
