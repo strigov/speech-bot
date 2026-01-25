@@ -67,3 +67,11 @@ coverage.xml
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Test results with real data
+tests/test_result/transcript*.json
+tests/test_result/transcript*.txt
+tests/test_result/transcript*.srt
+
+# Claude Code local settings
+.claude/settings.local.json
