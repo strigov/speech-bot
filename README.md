@@ -1,169 +1,396 @@
-# GigaAM & PyAnnote Telegram Transcriber
+# Telegram-бот для транскрибации аудио
 
-A Windows-native Telegram Bot for high-quality audio transcription using GigaAM v3 ASR and PyAnnote speaker diarization. Designed for RTX 5070 Ti (16GB VRAM) and long-form audio processing.
+Telegram-бот для высококачественной транскрибации аудио с использованием **GigaAM v3** (распознавание речи) и **PyAnnote** (диаризация спикеров). Оптимизирован для Windows и видеокарт NVIDIA с поддержкой CUDA.
 
-## Features
+## Возможности
 
-- **High-Accuracy ASR**: Uses GigaAM v3 for state-of-the-art Russian speech recognition.
-- **Speaker Diarization**: Identifies and labels different speakers using PyAnnote 3.1.
-- **Long Audio Support**: Processes files up to several hours with smart chunking and memory management.
-- **Windows Native**: Optimized for Windows 10/11 with CUDA 12.1 support.
-- **Queue System**: Manages concurrent requests with a priority queue and fair usage limits.
-- **Admin Tools**: Built-in commands for monitoring GPU usage and queue status.
+- **Высокоточное распознавание речи**: GigaAM v3 — современная модель для русской речи
+- **Диаризация спикеров**: PyAnnote определяет и разделяет разных говорящих
+- **Длинные аудиозаписи**: Обработка файлов до нескольких часов с интеллектуальным разбиением
+- **Поддержка GPU**: Ускорение на видеокартах NVIDIA (CUDA 12.x)
+- **Система очередей**: Управление параллельными запросами с приоритизацией
+- **Админ-команды**: Мониторинг GPU и состояния очереди
 
-## GPU Support: RTX 5070 Ti (Blackwell Architecture)
+## Системные требования
 
-**IMPORTANT**: The RTX 5070 Ti uses Blackwell architecture (sm_120) which requires **PyTorch NIGHTLY** builds for GPU acceleration. Stable PyTorch releases do not support this GPU yet (as of January 2025).
+- **ОС**: Windows 10 или 11 (x64)
+- **GPU**: NVIDIA с 12+ ГБ VRAM (рекомендуется RTX 3080/4070/5070 или выше)
+- **Драйвер**: NVIDIA Driver 535+ (для RTX 50xx — версия 581.80+)
+- **Накопитель**: SSD с минимум 50 ГБ свободного места
+- **Софт**:
+  - Python 3.10.x (строгое требование)
+  - FFmpeg (должен быть в PATH)
+  - Git (опционально)
 
-### What This Means
+## Быстрая установка
 
-- GPU acceleration is available via PyTorch nightly (development builds)
-- Nightly builds may be unstable and have occasional bugs
-- Stable PyTorch support expected Q2-Q3 2025
-- PyAnnote was upgraded from 3.3.1 to 4.0.2+ for compatibility
-
-### If You Experience Issues
-
-**Fallback to CPU mode** (slower but stable):
+### 1. Клонируйте репозиторий
 
 ```batch
-cd d:\Projects\speech-bot
-venv\Scripts\activate.bat
-pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+git clone <url-репозитория>
+cd speech-bot
 ```
 
-Then set in `.env`:
+### 2. Запустите установку окружения
+
+```batch
+setup_environment.bat
+```
+
+Скрипт автоматически:
+- Создаст виртуальное окружение Python
+- Установит PyTorch с поддержкой CUDA
+- Установит все зависимости
+- Создаст необходимые директории
+
+### 3. Загрузите модели ML
+
+```batch
+download_models.bat
+```
+
+**Важно**: Перед запуском скрипта вам потребуется:
+
+1. **Токен Hugging Face** — получите на https://huggingface.co/settings/tokens
+2. **Принять лицензию PyAnnote** — перейдите по ссылке https://huggingface.co/pyannote/speaker-diarization-community-1 и нажмите "Agree"
+
+### 4. Настройте конфигурацию
+
+Отредактируйте файл `.env`:
+
 ```ini
-MODEL_DEVICE=cpu
-DIARIZATION_DEVICE=cpu
-PROCESSING_TIMEOUT_MINUTES=120
+# Обязательные настройки
+TELEGRAM_BOT_TOKEN=ваш_токен_бота
+HF_TOKEN=ваш_токен_huggingface
 ```
 
-CPU mode is 10-50x slower but guaranteed to work until stable PyTorch support arrives.
+### 5. Запустите бота
 
-## System Requirements
+```batch
+start.bat
+```
 
-- **OS**: Windows 10 or 11 (x64)
-- **GPU**: NVIDIA GPU with 12GB+ VRAM (RTX 3080/4070/5070 or better recommended)
-- **Driver**: NVIDIA Driver 581.80+ (for RTX 5070 Ti Blackwell support)
-- **CUDA**: CUDA Toolkit 12.8 (bundled with PyTorch nightly, or install separately)
-- **Storage**: SSD with at least 50GB free space (for models and temp files)
-- **Software**:
-  - Python 3.10.x (Strict requirement)
-  - FFmpeg (Must be in system PATH)
-  - Git (Optional, for cloning)
+---
 
-## Installation
+## Подробная инструкция по установке моделей
 
-1. **Clone or Download** the repository to a folder (e.g., `C:\Projects\speech-bot`).
+### Используемые модели
 
-2. **Run Setup Script**:
-   Double-click `setup_environment.bat`. This will:
-   - Create a virtual environment (`venv`)
-   - Install PyTorch with CUDA support
-   - Install all Python dependencies
-   - Create necessary directories (`temp`, `logs`)
-   - Create a `.env` file from the template
+| Модель | Назначение | Размер | Источник |
+|--------|-----------|--------|----------|
+| GigaAM v3 | Распознавание речи (ASR) | ~1.5 ГБ | [ai-sage/GigaAM-v3](https://huggingface.co/ai-sage/GigaAM-v3) |
+| PyAnnote Speaker Diarization | Определение спикеров | ~500 МБ | [pyannote/speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1) |
 
-3. **Configure Environment**:
-   Open `.env` in a text editor (Notepad, VS Code) and set your tokens:
+### Автоматическая загрузка
+
+Запустите скрипт загрузки:
+
+```batch
+download_models.bat
+```
+
+Или Python-версию напрямую:
+
+```batch
+venv\Scripts\activate.bat
+python download_models.py
+```
+
+### Ручная загрузка (если автоматическая не сработала)
+
+#### GigaAM v3
+
+GigaAM загружается автоматически при первом запуске через `transformers`:
+
+```python
+from transformers import AutoModel
+model = AutoModel.from_pretrained("ai-sage/GigaAM-v3", trust_remote_code=True)
+```
+
+Модель кэшируется в `~/.cache/huggingface/hub/`.
+
+#### PyAnnote Speaker Diarization
+
+1. **Зарегистрируйтесь на Hugging Face**: https://huggingface.co/join
+
+2. **Создайте токен доступа**:
+   - Перейдите на https://huggingface.co/settings/tokens
+   - Нажмите "New token"
+   - Выберите тип "Read"
+   - Скопируйте токен
+
+3. **Примите лицензионное соглашение**:
+   - Откройте https://huggingface.co/pyannote/speaker-diarization-community-1
+   - Нажмите кнопку "Agree and access repository"
+
+4. **Укажите токен в `.env`**:
    ```ini
-   TELEGRAM_BOT_TOKEN=your_telegram_bot_token
-   HF_TOKEN=your_hugging_face_token
-   ```
-   *Note: You need to accept the user agreement for `pyannote/speaker-diarization-3.1` on Hugging Face to get a valid token. (Required for diarization feature)*
-
-## Usage
-
-### Starting the Bot
-Double-click `start.bat`.
-The console will show the initialization process. Once you see "Bot started!", it is ready to receive messages.
-
-### Bot Commands
-- `/start` - Welcome message and status check.
-- `/help` - Show usage instructions.
-- `/status` - Check your current position in the queue.
-- `/cancel` - Cancel your current processing task.
-
-### Admin Commands
-- `/admin gpu` - Show current GPU memory usage.
-- `/admin queue` - Show queue statistics.
-
-## Configuration
-
-You can tweak settings in `config/models.yaml` and `config/limits.yaml` (if available) or directly in `.env`:
-
-- **MAX_VRAM_GB**: Limit GPU memory usage (default: 14.0 for 16GB cards).
-- **MAX_AUDIO_DURATION_MINUTES**: Maximum allowed audio length (default: 180).
-- **MAX_USER_CONCURRENT**: Max files per user in queue (default: 3).
-
-### Access Control
-
-By default, the bot is open to everyone. You can restrict access to specific users and chats:
-
-1. **Admin Users** - Can use admin commands like `/admin`:
-   ```ini
-   TELEGRAM_ADMIN_USER_IDS=123456789,987654321
+   HF_TOKEN=hf_ваш_токен_здесь
    ```
 
-2. **Allowed Chats** - Can send audio files for transcription:
-   ```ini
-   TELEGRAM_ALLOWED_CHAT_IDS=123456789,-1001234567890,987654321
+5. Модель загрузится автоматически при первом запуске
+
+### Расположение кэша моделей
+
+По умолчанию модели кэшируются в:
+
+- **Windows**: `C:\Users\<пользователь>\.cache\huggingface\hub\`
+- **Размер кэша**: ~3-5 ГБ после загрузки всех моделей
+
+Для изменения директории кэша установите переменную окружения:
+
+```batch
+set HF_HOME=D:\models\huggingface
+```
+
+---
+
+## Команды бота
+
+### Пользовательские команды
+
+| Команда | Описание |
+|---------|----------|
+| `/start` | Приветствие и проверка статуса |
+| `/help` | Справка по использованию |
+| `/status` | Текущая позиция в очереди |
+| `/cancel` | Отмена текущей обработки |
+
+### Админ-команды
+
+| Команда | Описание |
+|---------|----------|
+| `/admin gpu` | Использование GPU-памяти |
+| `/admin queue` | Статистика очереди |
+
+---
+
+## Конфигурация (.env)
+
+### Telegram
+
+```ini
+# Токен бота от @BotFather
+TELEGRAM_BOT_TOKEN=your_token_here
+
+# Опционально: для файлов >20 МБ (до 2 ГБ)
+TELEGRAM_API_ID=your_api_id
+TELEGRAM_API_HASH=your_api_hash
+TELEGRAM_USE_CLIENT_API=true
+```
+
+### Модели и GPU
+
+```ini
+# Токен Hugging Face
+HF_TOKEN=hf_your_token_here
+
+# Устройство: cuda или cpu
+MODEL_DEVICE=cuda
+DIARIZATION_DEVICE=cuda
+
+# Размер батча (уменьшите при OOM)
+ASR_BATCH_SIZE=32
+DIARIZATION_BATCH_SIZE=32
+```
+
+### Ограничения
+
+```ini
+# Максимальная длительность аудио (минуты)
+MAX_AUDIO_DURATION_MINUTES=180
+
+# Максимальный размер файла (МБ)
+MAX_FILE_SIZE_MB=500
+
+# Лимит VRAM (ГБ) — оставьте запас для системы
+MAX_VRAM_GB=14.0
+```
+
+### Контроль доступа
+
+```ini
+# ID администраторов (через запятую)
+TELEGRAM_ADMIN_USER_IDS=123456789,987654321
+
+# Разрешённые чаты (пусто = все)
+TELEGRAM_ALLOWED_CHAT_IDS=123456789,-1001234567890
+```
+
+**Как узнать ID:**
+- Личный ID: напишите боту @userinfobot
+- ID группы: добавьте @RawDataBot в группу
+
+---
+
+## Поддержка больших файлов (>20 МБ)
+
+Стандартный Telegram Bot API ограничивает размер загружаемых файлов до **20 МБ**. Для обработки файлов до **2 ГБ** необходимо использовать Telegram Client API (MTProto).
+
+### Шаг 1: Получение API credentials
+
+1. Откройте https://my.telegram.org и войдите по номеру телефона
+
+2. Введите код подтверждения, который придёт в Telegram
+
+3. Нажмите **"API development tools"**
+
+4. Если приложение ещё не создано, заполните форму:
+   - **App title**: любое название (например, "Speech Bot")
+   - **Short name**: короткое имя латиницей (например, "speechbot")
+   - **Platform**: можно выбрать "Desktop"
+   - **Description**: опционально
+
+5. Нажмите **"Create application"**
+
+6. Скопируйте полученные данные:
+   - **App api_id** — числовой ID (например, `12345678`)
+   - **App api_hash** — строка из 32 символов (например, `a1b2c3d4e5f6...`)
+
+### Шаг 2: Настройка .env
+
+Добавьте полученные данные в файл `.env`:
+
+```ini
+# Telegram Client API для больших файлов
+TELEGRAM_API_ID=12345678
+TELEGRAM_API_HASH=a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6
+TELEGRAM_USE_CLIENT_API=true
+```
+
+### Шаг 3: Первый запуск
+
+При первом запуске с Client API бот попросит авторизацию:
+
+1. Введите номер телефона аккаунта, от имени которого будет работать бот
+2. Введите код подтверждения из Telegram
+3. Если включена двухфакторная аутентификация — введите пароль
+
+Сессия сохраняется, повторная авторизация не потребуется.
+
+### Шаг 4: Настройка Privacy Mode (для групп)
+
+Если бот будет работать в группах, отключите Privacy Mode:
+
+1. Напишите @BotFather в Telegram
+2. Отправьте `/setprivacy`
+3. Выберите вашего бота
+4. Выберите **Disable**
+
+Это позволит боту видеть все сообщения в группе, а не только команды.
+
+### Ограничения и особенности
+
+| Параметр | Bot API | Client API |
+|----------|---------|------------|
+| Макс. размер файла | 20 МБ | 2 ГБ |
+| Требует авторизации | Нет | Да (один раз) |
+| Скорость загрузки | Средняя | Высокая |
+
+**Важно:**
+- API credentials привязаны к вашему аккаунту Telegram
+- Не передавайте `api_id` и `api_hash` третьим лицам
+- При подозрении на утечку — отзовите ключи на my.telegram.org
+
+---
+
+## Решение проблем
+
+### "CUDA not available"
+
+1. Проверьте установку драйвера:
+   ```batch
+   nvidia-smi
    ```
-   - Use positive IDs for private chats (user IDs)
-   - Use negative IDs for group chats (start with `-100`)
-   - Leave empty to allow everyone
 
-**How to get Chat/User IDs:**
-- For private chats: User IDs can be obtained from bots like @userinfobot
-- For groups: Add @RawDataBot to your group - it will show the chat ID
-
-### Large Files Support (> 20 MB)
-
-Telegram Bot API has a 20 MB file size limit. To support larger files:
-
-1. **Get Telegram API credentials** from https://my.telegram.org/apps:
-   - Click "API development tools"
-   - Fill in the form (app title/short name can be anything)
-   - You'll get `api_id` (number) and `api_hash` (string)
-
-2. **Configure in `.env`**:
-   ```ini
-   TELEGRAM_API_ID=your_api_id_here
-   TELEGRAM_API_HASH=your_api_hash_here
-   TELEGRAM_USE_CLIENT_API=true
+2. Проверьте версию PyTorch:
+   ```batch
+   python -c "import torch; print(torch.cuda.is_available(), torch.version.cuda)"
    ```
 
-3. **Enable Privacy Mode OFF** for group chat support:
-   - Message @BotFather in Telegram
-   - Send `/setprivacy`
-   - Select your bot
-   - Choose **Disable** (turn privacy mode OFF)
+3. Переустановите PyTorch с CUDA:
+   ```batch
+   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+   ```
 
-   This allows the bot to see all messages in groups, not just commands or replies.
+### "Out of Memory" (OOM)
 
-With Client API enabled, the bot can download files up to 2 GB.
+1. Уменьшите размер батча в `.env`:
+   ```ini
+   ASR_BATCH_SIZE=16
+   DIARIZATION_BATCH_SIZE=16
+   ```
 
-## Troubleshooting
+2. Уменьшите лимит VRAM:
+   ```ini
+   MAX_VRAM_GB=12.0
+   ```
 
-**"sm_120 is not compatible" or "CUDA capability sm_120 not supported"**
-- Your RTX 5070 Ti requires PyTorch nightly with CUDA 12.8
-- Verify installation: `python -c "import torch; print(torch.__version__, torch.version.cuda)"`
-- Should show: `2.10.0.dev20251124+cu128 12.8`
-- Reinstall if needed: `pip install --pre torch torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128`
-- Run `python check_cuda.py` for detailed diagnostics
+3. Переключитесь на CPU (медленнее, но стабильно):
+   ```ini
+   MODEL_DEVICE=cpu
+   DIARIZATION_DEVICE=cpu
+   ```
 
-**"CUDA not available"**
-- Run `setup_cuda.bat` to verify your driver and CUDA installation.
-- Ensure you installed the correct PyTorch version (the setup script handles this).
+### "FFmpeg not found"
 
-**"OOM (Out of Memory)"**
-- Reduce `ASR_BATCH_SIZE` or `DIARIZATION_BATCH_SIZE` in `.env`.
-- Lower `MAX_VRAM_GB` to leave more headroom for the system.
+1. Скачайте FFmpeg: https://ffmpeg.org/download.html
+2. Распакуйте в удобную папку
+3. Добавьте путь к `bin` в переменную PATH
+4. Или укажите путь в `.env`:
+   ```ini
+   FFMPEG_PATH=C:/path/to/ffmpeg/bin
+   ```
 
-**"FFmpeg not found"**
-- Install FFmpeg and add `bin` folder to your Windows PATH environment variable.
-- Restart the terminal/script after installing.
+### RTX 50xx (Blackwell) — особенности
 
-## License
-[License Name]
+Видеокарты RTX 5070/5080/5090 требуют PyTorch nightly:
+
+```batch
+pip install --pre torch torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+```
+
+При проблемах используйте CPU-режим до выхода стабильной версии PyTorch.
+
+### Модели не загружаются
+
+1. Проверьте интернет-соединение
+2. Убедитесь что токен HF_TOKEN верный
+3. Проверьте что приняли лицензию PyAnnote
+4. Попробуйте очистить кэш:
+   ```batch
+   rmdir /s /q "%USERPROFILE%\.cache\huggingface"
+   ```
+
+---
+
+## Структура проекта
+
+```
+speech-bot/
+├── main.py                 # Точка входа
+├── start.bat               # Запуск бота
+├── setup_environment.bat   # Установка окружения
+├── download_models.bat     # Загрузка моделей
+├── download_models.py      # Скрипт загрузки моделей
+├── .env                    # Конфигурация (не в git)
+├── .env.example            # Пример конфигурации
+├── requirements.txt        # Python-зависимости
+├── config/                 # YAML-конфигурации
+├── src/
+│   ├── bot/                # Telegram-обработчики
+│   ├── pipeline/           # ML-пайплайн
+│   │   ├── transcriber.py  # GigaAM ASR
+│   │   ├── diarizer.py     # PyAnnote диаризация
+│   │   ├── preprocessor.py # Предобработка аудио
+│   │   └── aggregator.py   # Сборка результатов
+│   └── utils/              # Утилиты
+├── temp/                   # Временные файлы
+└── logs/                   # Логи
+```
+
+---
+
+## Лицензия
+
+MIT License
