@@ -45,6 +45,9 @@ temp/
 *.tmp
 *.temp
 
+# Bot lock
+bot.lock
+
 # Model cache
 .cache/
 models/
