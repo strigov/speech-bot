@@ -239,8 +239,9 @@ class GigaAMTranscriber:
         temp_dir: Path,
     ) -> List[Tuple[str, Optional[float]]]:
         """
-        Transcribe a batch of audio segments using GigaAM's .transcribe()
-        or .transcribe_longform() when segments exceed the short-form limit.
+        Transcribe a batch of audio segments using GigaAM's forward() directly
+        for batch processing. Falls back to transcribe_longform() for segments
+        exceeding the short-form limit.
 
         Returns:
             List of (text, confidence) tuples
@@ -248,58 +249,78 @@ class GigaAMTranscriber:
         if not segments:
             return []
 
-        # Ensure dependencies are loaded
         if torch is None:
             _import_dependencies()
 
-        results = []
+        # Split segments into short (batchable) and long (sequential)
+        short_indices = []
+        short_segments = []
+        long_indices = []
+        long_segments = []
+
+        for i, seg in enumerate(segments):
+            duration = len(seg) / self.sample_rate
+            if duration >= self.longform_threshold_seconds:
+                long_indices.append(i)
+                long_segments.append(seg)
+            else:
+                short_indices.append(i)
+                short_segments.append(seg)
+
+        results = [None] * len(segments)
 
         with torch.inference_mode():
-            for i, segment_audio in enumerate(segments):
-                # Save segment to temporary file for GigaAM's transcribe method
-                segment_path = temp_dir / f"segment_{i}.wav"
-                torchaudio.save(
-                    str(segment_path),
-                    segment_audio.unsqueeze(0),
-                    self.sample_rate,
+            # Batch process short segments via forward()
+            if short_segments:
+                device = self._model.device
+                dtype = self._model.dtype
+                inner = self._model.model  # GigaAMASR instance
+
+                lengths = torch.tensor(
+                    [len(s) for s in short_segments], device=device
+                )
+                max_len = int(lengths.max().item())
+                batch = torch.zeros(
+                    len(short_segments), max_len,
+                    dtype=dtype, device=device,
+                )
+                for i, seg in enumerate(short_segments):
+                    batch[i, :len(seg)] = seg.to(device=device, dtype=dtype)
+
+                encoded, encoded_len = self._model.forward(batch, lengths)
+                texts = inner.decoding.decode(
+                    inner.head, encoded, encoded_len
                 )
 
+                for idx, text in zip(short_indices, texts):
+                    results[idx] = (str(text), None)
+
+            # Process long segments sequentially via transcribe_longform()
+            for idx, seg in zip(long_indices, long_segments):
+                segment_path = temp_dir / f"segment_long_{idx}.wav"
+                torchaudio.save(
+                    str(segment_path),
+                    seg.unsqueeze(0),
+                    self.sample_rate,
+                )
                 try:
-                    # Calculate segment duration
-                    duration_seconds = len(segment_audio) / self.sample_rate
-
-                    # Use transcribe_longform for segments beyond the model limit (~25s)
-                    if (
-                        duration_seconds >= self.longform_threshold_seconds
-                        and hasattr(self._model, "transcribe_longform")
-                    ):
-                        longform_output = self._model.transcribe_longform(str(segment_path))
-
-                        if isinstance(longform_output, list):
-                            parts = []
-                            for item in longform_output:
-                                if isinstance(item, dict):
-                                    parts.append(str(item.get("transcription", "")).strip())
-                                else:
-                                    parts.append(str(item).strip())
-                            text = " ".join(p for p in parts if p)
-                        else:
-                            text = str(longform_output)
+                    longform_output = self._model.transcribe_longform(
+                        str(segment_path)
+                    )
+                    if isinstance(longform_output, list):
+                        parts = []
+                        for item in longform_output:
+                            if isinstance(item, dict):
+                                parts.append(
+                                    str(item.get("transcription", "")).strip()
+                                )
+                            else:
+                                parts.append(str(item).strip())
+                        text = " ".join(p for p in parts if p)
                     else:
-                        transcription = self._model.transcribe(str(segment_path))
-
-                        # GigaAM returns string directly
-                        if isinstance(transcription, str):
-                            text = transcription
-                        else:
-                            # In case it returns a dict or other structure
-                            text = str(transcription)
-
-                    # No confidence scores available from GigaAM
-                    results.append((text, None))
-
+                        text = str(longform_output)
+                    results[idx] = (text, None)
                 finally:
-                    # Clean up temp file
                     if segment_path.exists():
                         segment_path.unlink()
 
