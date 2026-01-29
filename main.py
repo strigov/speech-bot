@@ -4,6 +4,7 @@ import asyncio
 import os
 import signal
 import sys
+import warnings
 from pathlib import Path
 
 # CRITICAL: Add FFmpeg DLL directory for Python 3.8+ (before any imports that use FFmpeg)
@@ -11,6 +12,11 @@ from pathlib import Path
 _ffmpeg_bin = r"D:\Projects\ffmpeg-6.1-full_build-shared\bin"
 if os.path.exists(_ffmpeg_bin):
     os.add_dll_directory(_ffmpeg_bin)
+
+# Suppress noisy deprecation warnings from ML libraries
+warnings.filterwarnings("ignore", category=UserWarning, module="torchaudio")
+warnings.filterwarnings("ignore", category=UserWarning, module="pyannote")
+warnings.filterwarnings("ignore", category=UserWarning, module="speechbrain")
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))

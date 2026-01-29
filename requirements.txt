@@ -1,6 +1,7 @@
 # Telegram Bot Framework
 aiogram>=3.10.0
 telethon>=1.36.0
+cryptg>=0.4
 
 # ML Framework (install separately with CUDA support)
 # Compatible versions: PyTorch 2.5.x + pyannote.audio 3.3.2

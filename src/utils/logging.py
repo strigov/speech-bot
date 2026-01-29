@@ -34,6 +34,9 @@ def setup_logging(log_level: str = "INFO", log_dir: Path | None = None) -> None:
         file_handler.setLevel(level)
         logging.getLogger().addHandler(file_handler)
 
+    # Suppress noisy third-party loggers
+    logging.getLogger("telethon").setLevel(logging.WARNING)
+
     # Configure structlog
     structlog.configure(
         processors=[

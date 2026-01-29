@@ -407,12 +407,6 @@ class Worker:
             audio_path = preprocess_result.processed_path
             duration = preprocess_result.duration_seconds
 
-            logger.info(
-                "preprocessing_complete",
-                task_id=task.task_id,
-                duration=f"{duration:.1f}s",
-            )
-
             # Save checkpoint
             self._save_checkpoint(task, "preprocessed", {
                 "audio_path": str(audio_path),
