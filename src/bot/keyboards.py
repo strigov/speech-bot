@@ -54,9 +54,13 @@ def get_confirm_keyboard(action: str) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def get_admin_keyboard() -> InlineKeyboardMarkup:
+def get_admin_keyboard(public_mode: bool = False) -> InlineKeyboardMarkup:
     """Get admin panel keyboard."""
+    mode_text = "🔓 Публичный" if public_mode else "🔒 Приватный"
     builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text=mode_text, callback_data="admin_mode"),
+    )
     builder.row(
         InlineKeyboardButton(text="📊 GPU Status", callback_data="admin_gpu"),
         InlineKeyboardButton(text="📋 Queue", callback_data="admin_queue"),

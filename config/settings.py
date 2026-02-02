@@ -45,30 +45,27 @@ class TelegramSettings(BaseSettings):
         description="Session name for Telegram Client"
     )
 
-    # Access control
-    admin_user_ids: list[int] = Field(
-        default_factory=list,
-        alias="ADMIN_USER_IDS",
-        description="List of admin user IDs who can use admin commands"
+    # Access control — str type to avoid pydantic JSON parsing of comma-separated values
+    admin_user_ids: str = Field(
+        default="",
+        description="Comma-separated list of admin user IDs"
     )
-    allowed_chat_ids: list[int] = Field(
-        default_factory=list,
-        alias="ALLOWED_CHAT_IDS",
-        description="List of allowed chat IDs (users and groups) for audio processing"
+    allowed_chat_ids: str = Field(
+        default="",
+        description="Comma-separated list of allowed chat/user IDs"
     )
 
-    @field_validator("admin_user_ids", "allowed_chat_ids", mode="before")
-    @classmethod
-    def parse_int_list(cls, v: Any) -> list[int]:
-        """Parse comma-separated string or list of integers."""
-        if isinstance(v, str):
-            # Parse comma-separated string
-            if not v.strip():
-                return []
-            return [int(x.strip()) for x in v.split(",") if x.strip()]
-        elif isinstance(v, list):
-            return [int(x) for x in v]
-        return []
+    def get_admin_user_ids(self) -> list[int]:
+        return self._parse_int_list(self.admin_user_ids)
+
+    def get_allowed_chat_ids(self) -> list[int]:
+        return self._parse_int_list(self.allowed_chat_ids)
+
+    @staticmethod
+    def _parse_int_list(v: str) -> list[int]:
+        if not v or not v.strip():
+            return []
+        return [int(x.strip()) for x in v.split(",") if x.strip()]
 
 
 class ModelSettings(BaseSettings):
@@ -203,6 +200,18 @@ class PathSettings(BaseSettings):
         self.checkpoint_dir = self.checkpoint_dir.resolve()
 
 
+class BotModeSettings(BaseSettings):
+    """Bot access mode configuration."""
+
+    model_config = SettingsConfigDict(env_prefix="", extra="ignore")
+
+    public_mode: bool = Field(
+        default=False,
+        alias="BOT_PUBLIC_MODE",
+        description="If True, bot is accessible to everyone; if False, only allowed chats"
+    )
+
+
 class DevelopmentSettings(BaseSettings):
     """Development configuration."""
 
@@ -303,6 +312,7 @@ class Settings(BaseSettings):
     memory: MemorySettings = Field(default_factory=lambda: MemorySettings(_env_file=".env"))
     paths: PathSettings = Field(default_factory=lambda: PathSettings(_env_file=".env"))
     dev: DevelopmentSettings = Field(default_factory=lambda: DevelopmentSettings(_env_file=".env"))
+    bot_mode: BotModeSettings = Field(default_factory=lambda: BotModeSettings(_env_file=".env"))
     limits: LimitsSettings = Field(default_factory=LimitsSettings.from_yaml)
 
     def __init__(self, **kwargs):

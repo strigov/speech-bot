@@ -52,6 +52,8 @@ class BotState:
         self.rate_limiter: Optional[RateLimiter] = None
         self.admin_ids: Set[int] = set()
         self.allowed_chat_ids: Set[int] = set()
+        self.configured_allowed_chat_ids: Set[int] = set()
+        self.public_mode: bool = False
         self._progress_messages: Dict[str, int] = {}  # task_id -> message_id
         self._user_progress_chats: Dict[str, int] = {}  # task_id -> chat_id
 
@@ -69,8 +71,16 @@ class BotState:
         self.settings = settings
         if settings:
             # Load access control lists
-            self.admin_ids = set(settings.telegram.admin_user_ids)
-            self.allowed_chat_ids = set(settings.telegram.allowed_chat_ids)
+            self.admin_ids = set(settings.telegram.get_admin_user_ids())
+            self.configured_allowed_chat_ids = set(settings.telegram.get_allowed_chat_ids())
+            self.public_mode = settings.bot_mode.public_mode
+            self.allowed_chat_ids = set() if self.public_mode else set(self.configured_allowed_chat_ids)
+            logger.info(
+                "access_control_loaded",
+                admin_ids=self.admin_ids,
+                allowed_chat_ids=self.allowed_chat_ids,
+                public_mode=self.public_mode,
+            )
 
             # Initialize rate limiter with admin bypass
             config = RateLimitConfig(
@@ -79,6 +89,12 @@ class BotState:
                 cooldown_seconds=settings.limits.rate_limits.per_user.cooldown_seconds,
             )
             self.rate_limiter = RateLimiter(config, admin_ids=self.admin_ids)
+
+    def toggle_mode(self) -> bool:
+        """Toggle between public and private mode. Returns new public_mode value."""
+        self.public_mode = not self.public_mode
+        self.allowed_chat_ids = set() if self.public_mode else set(self.configured_allowed_chat_ids)
+        return self.public_mode
 
     def add_admin(self, user_id: int) -> None:
         """Add an admin user."""
@@ -650,11 +666,13 @@ async def cmd_admin(message: Message, command: CommandObject) -> None:
         return
 
     if not command.args:
+        mode_label = "🔓 Публичный" if state.public_mode else "🔒 Приватный"
         await message.answer(
-            "🔧 **Admin Panel**\n"
-            "\n"
-            "Choose an action:",
-            reply_markup=get_admin_keyboard(),
+            f"🔧 **Admin Panel**\n"
+            f"\n"
+            f"Режим: {mode_label}\n"
+            f"Choose an action:",
+            reply_markup=get_admin_keyboard(state.public_mode),
             parse_mode="Markdown",
         )
         return
@@ -670,6 +688,8 @@ async def cmd_admin(message: Message, command: CommandObject) -> None:
         await admin_clear_stuck(message)
     elif subcommand == "stats":
         await admin_stats(message)
+    elif subcommand == "mode":
+        await admin_toggle_mode(message)
     else:
         await message.answer(f"Unknown admin command: {subcommand}")
 
@@ -749,6 +769,21 @@ async def admin_stats(message: Message) -> None:
     )
 
 
+async def admin_toggle_mode(message: Message) -> None:
+    """Toggle bot access mode between public and private."""
+    is_public = state.toggle_mode()
+    if is_public:
+        label = "🔓 Публичный"
+        desc = "Бот доступен всем пользователям"
+    else:
+        label = "🔒 Приватный"
+        desc = "Бот доступен только в разрешённых чатах"
+    await message.answer(
+        f"Режим переключён: **{label}**\n{desc}",
+        parse_mode="Markdown",
+    )
+
+
 @admin_router.callback_query(F.data.startswith("admin_"))
 async def callback_admin(callback: CallbackQuery) -> None:
     """Handle admin callback buttons."""
@@ -767,6 +802,13 @@ async def callback_admin(callback: CallbackQuery) -> None:
         await admin_clear_stuck(callback.message)
     elif action == "stats":
         await admin_stats(callback.message)
+    elif action == "mode":
+        await admin_toggle_mode(callback.message)
+        # Update admin panel keyboard to reflect new mode
+        mode_label = "🔓 Публичный" if state.public_mode else "🔒 Приватный"
+        await callback.message.edit_reply_markup(
+            reply_markup=get_admin_keyboard(state.public_mode),
+        )
     elif action == "restart":
         await callback.message.answer("🔄 Restarting worker... (not implemented yet)")
 
