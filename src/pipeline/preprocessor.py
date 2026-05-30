@@ -18,6 +18,7 @@ from src.utils.audio import (
     is_supported_format,
 )
 from src.utils.file_manager import FileManager
+from src.utils.validation import FileValidator
 
 logger = structlog.get_logger(__name__)
 
@@ -104,6 +105,9 @@ class AudioPreprocessor:
 
             if len(header) < 4:
                 return False, None
+
+            if FileValidator.is_mp3_frame_header(header):
+                return True, "mp3"
 
             # Check known magic bytes
             for magic, format_name in MAGIC_BYTES.items():

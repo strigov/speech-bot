@@ -183,6 +183,26 @@ def test_file_validator_valid_mp3(test_dir):
     assert is_valid is True
 
 
+def test_file_validator_valid_mp3_with_crc(test_dir):
+    """Test file validator accepts MP3 frame sync headers with CRC."""
+    mp3_path = test_dir / "test_crc.mp3"
+    with open(mp3_path, "wb") as f:
+        f.write(b"\xFF\xFA" + b"\x00" * 100)
+
+    is_valid, msg = FileValidator.validate_file(mp3_path)
+    assert is_valid is True
+
+
+def test_file_validator_valid_mpeg25_mp3(test_dir):
+    """Test file validator accepts MPEG 2.5 MP3 frame sync headers."""
+    mp3_path = test_dir / "test_mpeg25.mp3"
+    with open(mp3_path, "wb") as f:
+        f.write(b"\xFF\xE3\x18\xC4" + b"\x00" * 100)
+
+    is_valid, msg = FileValidator.validate_file(mp3_path)
+    assert is_valid is True
+
+
 def test_file_validator_valid_wav(test_dir):
     """Test file validator accepts valid WAV files."""
     wav_path = test_dir / "test.wav"

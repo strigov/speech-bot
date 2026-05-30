@@ -95,6 +95,20 @@ async def test_preprocessor_invalid_audio_file(tmp_path):
         assert result.is_valid is False
 
 
+def test_preprocessor_accepts_mpeg25_mp3_magic_bytes(tmp_path):
+    """Test preprocessor accepts MP3 frame sync variants used by voice files."""
+    mock_file_manager = MagicMock()
+    preprocessor = AudioPreprocessor(file_manager=mock_file_manager)
+
+    input_file = tmp_path / "mpeg25.mp3"
+    input_file.write_bytes(b"\xFF\xE3\x18\xC4" + b"\x00" * 100)
+
+    is_valid, detected_format = preprocessor._validate_magic_bytes(input_file)
+
+    assert is_valid is True
+    assert detected_format == "mp3"
+
+
 # --- Aggregator Tests ---
 
 def test_aggregator_merge():

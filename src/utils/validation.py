@@ -1,7 +1,8 @@
 """File validation utilities."""
 
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Optional, Tuple
+
 
 class FileValidator:
     """Validates files based on magic bytes and structure."""
@@ -11,6 +12,7 @@ class FileValidator:
         "mp3": [
             (0, b"\x49\x44\x33"),  # ID3
             (0, b"\xFF\xFB"),      # MPEG-1 Layer 3
+            (0, b"\xFF\xFA"),      # MPEG-1 Layer 3 with CRC
             (0, b"\xFF\xF3"),      # MPEG-1 Layer 3
             (0, b"\xFF\xF2"),      # MPEG-1 Layer 3
         ],
@@ -40,6 +42,27 @@ class FileValidator:
         ]
     }
 
+    @staticmethod
+    def is_mp3_frame_header(header: bytes) -> bool:
+        """Check MPEG audio frame sync headers, including MPEG 2.5 variants."""
+        if len(header) < 4:
+            return False
+
+        if header[0] != 0xFF or (header[1] & 0xE0) != 0xE0:
+            return False
+
+        version_id = (header[1] >> 3) & 0x03
+        layer = (header[1] >> 1) & 0x03
+        bitrate_index = (header[2] >> 4) & 0x0F
+        sample_rate_index = (header[2] >> 2) & 0x03
+
+        return (
+            version_id != 0x01
+            and layer != 0x00
+            and bitrate_index != 0x0F
+            and sample_rate_index != 0x03
+        )
+
     @classmethod
     def validate_file(cls, file_path: Path) -> Tuple[bool, Optional[str]]:
         """
@@ -57,6 +80,9 @@ class FileValidator:
         try:
             with open(file_path, "rb") as f:
                 header = f.read(32)  # Read first 32 bytes
+
+            if cls.is_mp3_frame_header(header):
+                return True, None
 
             # Check against signatures
             for fmt, sigs in cls.SIGNATURES.items():
